@@ -132,7 +132,8 @@ class caf(gr.sync_block):
         #
         # Using fftfreq ensures the Doppler axis is symmetric around zero
         # after fftshift (applied later on the output matrix).
-        doppler_freqs = np.fft.fftfreq(num_doppler_bins, d=1.0 / sample_rate)
+        max_doppler_hz = 1000.0  # ±1000 Hz covers ~300 m/s at 510 MHz
+        doppler_freqs = np.linspace(-max_doppler_hz, max_doppler_hz, num_doppler_bins)
         t = np.arange(cpi_samp, dtype=np.float32) / sample_rate
         self._doppler_tones = np.exp(
             1j * 2.0 * np.pi
