@@ -95,7 +95,8 @@ class caf(gr.sync_block):
                  num_doppler_bins=128,
                  num_delay_bins=128,
                  cpi_skip=1,
-                 sample_rate=2.4e6):
+                 sample_rate=2.4e6,
+                 max_doppler=1000.0):
 
         # Validate
         if num_delay_bins > cpi_samp:
@@ -117,6 +118,7 @@ class caf(gr.sync_block):
         self._nd  = num_doppler_bins
         self._nl  = num_delay_bins
         self._fs  = sample_rate
+        self._max_doppler = float(max_doppler)
         self._skip = max(1, int(cpi_skip))
         self._skip_ctr = 0
 
@@ -132,8 +134,7 @@ class caf(gr.sync_block):
         #
         # Using fftfreq ensures the Doppler axis is symmetric around zero
         # after fftshift (applied later on the output matrix).
-        max_doppler_hz = 1000.0  # ±1000 Hz covers ~300 m/s at 510 MHz
-        doppler_freqs = np.linspace(-max_doppler_hz, max_doppler_hz, num_doppler_bins)
+        doppler_freqs = np.linspace(-max_doppler, max_doppler, num_doppler_bins)
         t = np.arange(cpi_samp, dtype=np.float32) / sample_rate
         self._doppler_tones = np.exp(
             1j * 2.0 * np.pi
@@ -177,13 +178,10 @@ class caf(gr.sync_block):
             # ── Compute CAF ──────────────────────────────────────────────
             self._compute_caf(ref_w, surv_w)
 
-            # ── fftshift Doppler axis ────────────────────────────────────
-            # Rearranges rows so zero-Doppler is at the centre row,
-            # negative Doppler above, positive below — natural for display.
-            shifted = np.fft.fftshift(self._caf_mat, axes=0)
-
             # ── Flatten and write to output port ─────────────────────────
-            out[produced] = shifted.ravel()
+            # With linspace Doppler axis, rows are already ordered
+            # from −max_doppler to +max_doppler (no fftshift needed).
+            out[produced] = self._caf_mat.ravel()
             produced += 1
 
         return produced
@@ -223,3 +221,4 @@ class caf(gr.sync_block):
     def get_num_doppler_bins(self): return self._nd
     def get_num_delay_bins(self):   return self._nl
     def get_sample_rate(self):      return self._fs
+    def get_max_doppler(self):      return self._max_doppler

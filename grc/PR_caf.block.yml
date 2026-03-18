@@ -11,6 +11,7 @@ templates:
         num_delay_bins=${num_delay_bins},
         cpi_skip=${cpi_skip},
         sample_rate=${sample_rate},
+        max_doppler=${max_doppler},
     )
   callbacks:
     - set_cpi_skip(${cpi_skip})
@@ -40,6 +41,11 @@ parameters:
     label: Sample Rate (Hz)
     dtype: float
     default: 'samp_rate'
+
+  - id: max_doppler
+    label: Max Doppler (Hz)
+    dtype: float
+    default: '1000.0'
 
 inputs:
   - label: ref

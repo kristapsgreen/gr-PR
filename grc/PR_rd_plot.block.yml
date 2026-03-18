@@ -1,6 +1,7 @@
 id: PR_rd_plot
 label: RD Plot
 category: '[PR]'
+flags: [ show_id ]
 
 templates:
   imports: from gnuradio.PR import rd_plot
@@ -9,12 +10,14 @@ templates:
         num_doppler_bins=${num_doppler_bins},
         num_delay_bins=${num_delay_bins},
         sample_rate=${sample_rate},
+        max_doppler=${max_doppler},
         dynamic_range_db=${dynamic_range_db},
         colormap=${colormap},
     )
   callbacks:
     - set_dynamic_range(${dynamic_range_db})
     - set_colormap(${colormap})
+    - set_max_doppler(${max_doppler})
 
 parameters:
   - id: num_doppler_bins
@@ -32,6 +35,11 @@ parameters:
     dtype: float
     default: 'samp_rate'
 
+  - id: max_doppler
+    label: Max Doppler (Hz)
+    dtype: float
+    default: '1000.0'
+
   - id: dynamic_range_db
     label: Dynamic Range (dB)
     dtype: float
@@ -43,6 +51,11 @@ parameters:
     default: '"inferno"'
     options: ['"inferno"', '"plasma"', '"viridis"', '"magma"', '"hot"', '"jet"', '"turbo"']
     option_labels: [Inferno, Plasma, Viridis, Magma, Hot, Jet, Turbo]
+
+  - id: gui_hint
+    label: GUI Hint
+    dtype: gui_hint
+    hide: part
 
 inputs:
   - label: caf_in
@@ -63,11 +76,14 @@ documentation: |-
     PARAMETERS
       num_doppler_bins  — must match CAF block
       num_delay_bins    — must match CAF block
-      sample_rate       — used for axis labelling only
+      sample_rate       — used for delay axis labelling
+      max_doppler       — ±Doppler range in Hz (must match CAF block)
       dynamic_range_db  — colour scale depth. Adjust to your target SNR.
       colormap          — initial colourmap (changeable at runtime in window)
-      gui_hint          — e.g. notebook_0@1 to place in a tab
+      gui_hint          — e.g. tab@0 to embed in the main GRC window
 
-    The display window also has runtime controls for dynamic range and colourmap.
+    EMBEDDING
+      Set gui_hint to embed the plot in the GRC main window alongside
+      QT GUI controls. Leave empty for a standalone window.
 
 file_format: 1
