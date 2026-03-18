@@ -3,45 +3,77 @@ label: DDC
 category: '[PR]'
 
 templates:
-  imports: from gnuradio import PR
-  make: PR.DDC()
+  imports: from gnuradio.PR import DDC
+  make: |
+    DDC(
+        cpi_samp=${cpi_samp},
+        num_taps=${num_taps},
+        reg_mu=${reg_mu},
+    )
+  callbacks:
+    - set_num_taps(${num_taps})
+    - set_reg_mu(${reg_mu})
 
-#  Make one 'parameters' list entry for every parameter you want settable from the GUI.
-#     Keys include:
-#     * id (makes the value accessible as keyname, e.g. in the make entry)
-#     * label (label shown in the GUI)
-#     * dtype (e.g. int, float, complex, byte, short, xxx_vector, ...)
-#     * default
 parameters:
-- id: parametername_replace_me
-  label: FIX ME:
-  dtype: string
-  default: You need to fill in your grc/PR_DDC.block.yaml
-#- id: ...
-#  label: ...
-#  dtype: ...
+  - id: cpi_samp
+    label: CPI Samples
+    dtype: int
+    default: '24000'
 
-#  Make one 'inputs' list entry per input and one 'outputs' list entry per output.
-#  Keys include:
-#      * label (an identifier for the GUI)
-#      * domain (optional - stream or message. Default is stream)
-#      * dtype (e.g. int, float, complex, byte, short, xxx_vector, ...)
-#      * vlen (optional - data stream vector length. Default is 1)
-#      * optional (optional - set to 1 for optional inputs. Default is 0)
+  - id: num_taps
+    label: Filter Taps (delays to cancel)
+    dtype: int
+    default: '128'
+
+  - id: reg_mu
+    label: Regularisation (μ)
+    dtype: float
+    default: '0.01'
+
 inputs:
-#- label: ...
-#  domain: ...
-#  dtype: ...
-#  vlen: ...
-#  optional: ...
+  - label: ref
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv
+    dtype: complex
+    vlen: ${cpi_samp}
 
 outputs:
-#- label: ...
-#  domain: ...
-#  dtype: ...
-#  vlen: ...
-#  optional: ...
+  - label: ref
+    dtype: complex
+    vlen: ${cpi_samp}
 
-#  'file_format' specifies the version of the GRC yml format used in the file
-#  and should usually not be changed.
+  - label: surv_clean
+    dtype: complex
+    vlen: ${cpi_samp}
+
+documentation: |-
+    Direct-path Disturbance Cancellation (DDC) — gr-PR
+
+    Removes direct-path signal and short-delay multipath clutter from the
+    surveillance channel using the ECA batch Wiener filter.
+
+    Place BETWEEN stream_to_vector and CAF:
+        stream_to_vector → DDC → CAF
+
+    Reference passes through unchanged; only surveillance is cleaned.
+
+    INPUTS
+      ref  (port 0) : complex vector, len = cpi_samp — reference channel
+      surv (port 1) : complex vector, len = cpi_samp — surveillance channel
+
+    OUTPUTS
+      ref        (port 0) : reference pass-through (unchanged)
+      surv_clean (port 1) : cleaned surveillance
+
+    PARAMETERS
+      cpi_samp   — must match stream_to_vector length
+      num_taps   — number of FIR taps / delay bins to cancel.
+                   Larger = deeper clutter removal but more CPU.
+                   Start with 100–300 for DVB-T at 2.4 MHz.
+      reg_mu     — Tikhonov regularisation (diagonal loading).
+                   Stabilises the matrix inversion.
+                   Typical: 0.001 to 1.0. Increase if artefacts appear.
+
 file_format: 1
