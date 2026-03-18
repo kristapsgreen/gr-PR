@@ -206,9 +206,9 @@ class caf(gr.sync_block):
             s_d = surv_w * self._doppler_tones[d]
 
             # Step 2: FFT cross-correlation
-            #   IFFT( FFT(ref) · FFT*(surv_shifted) )
+            #   was swapped  corrected - IFFT( FFT(ref) · FFT*(surv_shifted) )
             #   = circular cross-correlation in time domain
-            R = np.fft.ifft(REF * np.conj(np.fft.fft(s_d)))
+            R = np.fft.ifft(np.fft.fft(s_d) * np.conj(REF))
 
             # Step 3: |·|², keep first num_delay_bins lags (positive delays)
             self._caf_mat[d, :] = (np.abs(R[:self._nl]) ** 2).astype(np.float32)
