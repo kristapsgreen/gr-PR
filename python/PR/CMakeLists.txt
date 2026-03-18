@@ -23,7 +23,8 @@ GR_PYTHON_INSTALL(
     FILES
     __init__.py
     caf.py
-    rd_plot.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/PR
+    rd_plot.py
+    DDC.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/PR
 )
 
 ########################################################################
@@ -42,3 +43,4 @@ add_custom_target(
 )
 GR_ADD_TEST(qa_caf ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_caf.py)
 GR_ADD_TEST(qa_rd_plot ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_rd_plot.py)
+GR_ADD_TEST(qa_DDC ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_DDC.py)
