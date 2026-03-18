@@ -1,0 +1,105 @@
+# gr-PR — GNU Radio Passive Radar OOT Module
+
+Two blocks for passive radar processing using the Cross Ambiguity Function.
+
+## Blocks
+
+| Block | Type | Description |
+|---|---|---|
+| `PR CAF` | sync_block | Computes CAF from ref + surv vector inputs |
+| `PR RD Plot` | sync_block (Qt sink) | Live Range-Doppler map display |
+
+---
+
+## GRC Flow Graph
+
+```
+                          ┌─────────────────┐
+KrakenSDR ch0 ──► s2v ──►│ ref             │
+                          │   PR CAF        ├──► PR RD Plot
+KrakenSDR ch1 ──► s2v ──►│ surv  caf_out   │
+                          └─────────────────┘
+```
+
+`s2v` = Blocks → Stream to Vector, length = `cpi_samp`
+
+Both `stream_to_vector` blocks and the CAF block must use the same `cpi_samp`.
+
+---
+
+## Installation
+
+```bash
+cd gr-PR
+chmod +x install.sh
+./install.sh          # installs
+./install.sh --uninstall  # removes
+```
+
+Then restart GRC. Blocks appear under category **[PR]**.
+
+### Dependencies
+
+```bash
+pip3 install numpy matplotlib PyQt5
+```
+
+---
+
+## Parameters
+
+### PR CAF
+
+| Parameter | Default | Description |
+|---|---|---|
+| `cpi_samp` | 24000 | CPI length in samples — **must match stream_to_vector** |
+| `num_doppler_bins` | 128 | Doppler bins — more = finer velocity resolution |
+| `num_delay_bins` | 128 | Delay bins — sets max range |
+| `cpi_skip` | 1 | Process 1 of every N CPIs (raise if CPU is overloaded) |
+| `sample_rate` | 2.4e6 | Use `samp_rate` variable |
+
+### PR RD Plot
+
+| Parameter | Default | Description |
+|---|---|---|
+| `num_doppler_bins` | 128 | **Must match CAF block** |
+| `num_delay_bins` | 128 | **Must match CAF block** |
+| `sample_rate` | 2.4e6 | Used for axis labels |
+| `dynamic_range_db` | 60 | Colour scale depth — adjust to target SNR |
+| `colormap` | inferno | Initial colourmap, changeable at runtime |
+
+---
+
+## Algorithm Summary
+
+### CAF Block
+
+For each Doppler bin `d`:
+
+1. **Doppler shift** — multiply surveillance by `exp(j·2π·ν_d·t)`
+2. **Window** — apply Hann window to reduce range sidelobes
+3. **Cross-correlate** — `IFFT(FFT(ref) · conj(FFT(surv_shifted)))`
+4. **Magnitude** — `|R[τ]|²` for `τ = 0 … num_delay_bins − 1`
+
+Output is fftshifted so zero-Doppler is at the centre row.
+
+### RD Plot Block
+
+1. Reshape flat vector to `(doppler_bins, delay_bins)` matrix
+2. Convert to dB: `10·log10(|CAF|² + ε)`
+3. Normalise to `[0,1]` using dynamic range
+4. Render via matplotlib imshow embedded in Qt5 window
+5. Thread safety: GR→Qt via `pyqtSignal` with `Qt.QueuedConnection`
+
+---
+
+## KrakenSDR @ 2.4 MHz — Suggested Starting Values
+
+| `cpi_samp` | CPI duration | Doppler resolution | Update rate |
+|---|---|---|---|
+| 2,400 | 1 ms | 1000 Hz | very fast |
+| **24,000** | **10 ms** | **100 Hz** | **100 Hz ✓** |
+| 240,000 | 100 ms | 10 Hz | 10 Hz ✓ |
+
+Start with `cpi_samp=24000`, `num_doppler_bins=128`, `num_delay_bins=128`.
+If CPU is overloaded, set `cpi_skip=2` or `cpi_skip=3`.

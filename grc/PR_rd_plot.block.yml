@@ -1,0 +1,73 @@
+id: PR_rd_plot
+label: RD Plot
+category: '[PR]'
+
+templates:
+  imports: from gnuradio.PR import rd_plot
+  make: |
+    rd_plot(
+        num_doppler_bins=${num_doppler_bins},
+        num_delay_bins=${num_delay_bins},
+        sample_rate=${sample_rate},
+        dynamic_range_db=${dynamic_range_db},
+        colormap=${colormap},
+    )
+  callbacks:
+    - set_dynamic_range(${dynamic_range_db})
+    - set_colormap(${colormap})
+
+parameters:
+  - id: num_doppler_bins
+    label: Doppler Bins
+    dtype: int
+    default: '128'
+
+  - id: num_delay_bins
+    label: Delay Bins
+    dtype: int
+    default: '128'
+
+  - id: sample_rate
+    label: Sample Rate (Hz)
+    dtype: float
+    default: 'samp_rate'
+
+  - id: dynamic_range_db
+    label: Dynamic Range (dB)
+    dtype: float
+    default: '60'
+
+  - id: colormap
+    label: Colormap
+    dtype: enum
+    default: '"inferno"'
+    options: ['"inferno"', '"plasma"', '"viridis"', '"magma"', '"hot"', '"jet"', '"turbo"']
+    option_labels: [Inferno, Plasma, Viridis, Magma, Hot, Jet, Turbo]
+
+inputs:
+  - label: caf_in
+    dtype: float
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+outputs: []
+
+documentation: |-
+    Range-Doppler Qt Display Sink — gr-PR
+
+    Renders a live Range-Doppler map from the CAF block output.
+
+    INPUT
+      caf_in : float32 vector, len = num_doppler_bins × num_delay_bins
+      Connect directly from the PR CAF block output.
+
+    PARAMETERS
+      num_doppler_bins  — must match CAF block
+      num_delay_bins    — must match CAF block
+      sample_rate       — used for axis labelling only
+      dynamic_range_db  — colour scale depth. Adjust to your target SNR.
+      colormap          — initial colourmap (changeable at runtime in window)
+      gui_hint          — e.g. notebook_0@1 to place in a tab
+
+    The display window also has runtime controls for dynamic range and colourmap.
+
+file_format: 1

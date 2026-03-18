@@ -1,0 +1,80 @@
+id: PR_caf
+label: CAF
+category: '[PR]'
+
+templates:
+  imports: from gnuradio.PR import caf
+  make: |
+    caf(
+        cpi_samp=${cpi_samp},
+        num_doppler_bins=${num_doppler_bins},
+        num_delay_bins=${num_delay_bins},
+        cpi_skip=${cpi_skip},
+        sample_rate=${sample_rate},
+    )
+  callbacks:
+    - set_cpi_skip(${cpi_skip})
+
+parameters:
+  - id: cpi_samp
+    label: CPI Samples
+    dtype: int
+    default: '24000'
+
+  - id: num_doppler_bins
+    label: Doppler Bins
+    dtype: int
+    default: '128'
+
+  - id: num_delay_bins
+    label: Delay Bins
+    dtype: int
+    default: '128'
+
+  - id: cpi_skip
+    label: CPI Skip (1=all)
+    dtype: int
+    default: '1'
+
+  - id: sample_rate
+    label: Sample Rate (Hz)
+    dtype: float
+    default: 'samp_rate'
+
+inputs:
+  - label: ref
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv
+    dtype: complex
+    vlen: ${cpi_samp}
+
+outputs:
+  - label: caf_out
+    dtype: float
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+documentation: |-
+    Cross Ambiguity Function (CAF) — gr-PR
+
+    Computes the CAF between a reference and surveillance signal over one CPI.
+
+    INPUTS
+      ref  (port 0) : complex vector, len = cpi_samp   — reference channel
+      surv (port 1) : complex vector, len = cpi_samp   — surveillance channel
+      Both fed from stream_to_vector blocks (length = cpi_samp).
+
+    OUTPUT
+      Flattened float32 magnitude matrix: num_doppler_bins × num_delay_bins
+      Row-major. Doppler axis is fftshifted (zero-Doppler at centre row).
+      Connect directly to PR RD Plot block.
+
+    PARAMETERS
+      cpi_samp        — must match stream_to_vector length
+      num_doppler_bins — Doppler resolution: more bins = finer resolution
+      num_delay_bins   — Range resolution: max range = nl * c / (2 * fs)
+      cpi_skip        — drop N-1 of every N CPIs to reduce CPU load
+      sample_rate     — use the samp_rate variable from your flowgraph
+
+file_format: 1
