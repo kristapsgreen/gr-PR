@@ -50,6 +50,7 @@
 #                    Row-major, Doppler-shifted (zero-Doppler at centre row)
 #
 
+import time
 import numpy as np
 import gnuradio.gr as gr
 
@@ -136,6 +137,12 @@ class _RDCanvas(FigureCanvas):
         ax.axhline(0.0, color='#00e5ff', linewidth=0.7,
                    linestyle='--', alpha=0.6)
 
+        # ── Performance metrics ──────────────────────────────────────────
+        self._last_time   = None
+        self._fps_smooth  = 0.0      # exponential moving average FPS
+        self._ifi_smooth  = 0.0      # exponential moving average inter-frame interval (ms)
+        self._alpha       = 0.1      # EMA smoothing factor
+
         self.draw()
 
     # ── Called only from Qt GUI thread via QueuedConnection ──────────────
@@ -146,6 +153,17 @@ class _RDCanvas(FigureCanvas):
         matrix shape: (num_doppler_bins, num_delay_bins), dtype float32
         Values are |CAF|² (linear power).
         """
+        # ── Timing ───────────────────────────────────────────────────────
+        now = time.perf_counter()
+        if self._last_time is not None:
+            dt = now - self._last_time
+            ifi_ms = dt * 1e3
+            fps    = 1.0 / dt if dt > 0 else 0.0
+            a = self._alpha
+            self._ifi_smooth = a * ifi_ms + (1 - a) * self._ifi_smooth
+            self._fps_smooth = a * fps    + (1 - a) * self._fps_smooth
+        self._last_time = now
+
         eps = 1e-30
         # Convert to dB
         mat_db = 10.0 * np.log10(matrix + eps)
@@ -159,7 +177,8 @@ class _RDCanvas(FigureCanvas):
 
         self._im.set_data(mat_norm)
         self._ax.set_title(
-            f'Range–Doppler Map    peak = {peak:.1f} dB',
+            f'Range–Doppler Map    peak = {peak:.1f} dB'
+            f'    |    {self._fps_smooth:.1f} FPS    {self._ifi_smooth:.1f} ms/frame',
             color='#ffffff', fontsize=12, fontweight='bold'
         )
         self.draw_idle()  # thread-safe redraw request
