@@ -18,11 +18,9 @@
 # │        r_l = c · τ_l / 2   (metres, bistatic range)               │
 # │      Displayed in µs for compactness.                               │
 # │                                                                     │
-# │    Y-axis — Doppler Frequency / Radial Velocity                    │
-# │      After fftshift in caf.py, row 0 = most negative Doppler,     │
-# │      centre row = zero Doppler, last row = most positive Doppler.  │
-# │        ν_d = (d − nd/2) · fs / nd   (Hz)                          │
-# │        v_d = c · ν_d / (2 · f_c)    (m/s, requires f_c)           │
+# │    Y-axis — Doppler Frequency                                      │
+# │      CAF output rows are ordered via linspace:                     │
+# │        row 0 = −max_doppler, centre row = 0, last = +max_doppler  │
 # │      Displayed in Hz.                                               │
 # │                                                                     │
 # │  NORMALISATION:                                                     │
@@ -40,6 +38,11 @@
 # │      Qt thread  ←  slot fires    ←  event loop picks it up        │
 # │    The numpy array is copied before emit to prevent the GR         │
 # │    scheduler from overwriting it before Qt reads it.               │
+# │                                                                     │
+# │  EMBEDDING:                                                         │
+# │    GRC calls pyqwidget() to retrieve the Qt widget and embeds it   │
+# │    in the main window when gui_hint is set.  The block must NOT    │
+# │    call .show() itself — GRC manages widget visibility.            │
 # └─────────────────────────────────────────────────────────────────────┘
 #
 # GNU Radio block type: sync_block (vector in, no output — sink)
@@ -47,7 +50,7 @@
 # Input
 # -----
 #   Port 0  caf_in — float32 vector, length = num_doppler_bins * num_delay_bins
-#                    Row-major, Doppler-shifted (zero-Doppler at centre row)
+#                    Row-major, Doppler axis ordered −max to +max (linspace)
 #
 
 import time
@@ -76,11 +79,13 @@ class _Bridge(QObject):
 class _RDCanvas(FigureCanvas):
 
     def __init__(self, num_doppler_bins, num_delay_bins,
-                 sample_rate, dynamic_range_db, colormap, parent=None):
+                 sample_rate, max_doppler, dynamic_range_db,
+                 colormap, parent=None):
 
         self._nd        = num_doppler_bins
         self._nl        = num_delay_bins
         self._fs        = sample_rate
+        self._max_dop   = max_doppler
         self._dyn_db    = dynamic_range_db
 
         # ── Figure setup ─────────────────────────────────────────────────
@@ -91,10 +96,9 @@ class _RDCanvas(FigureCanvas):
 
         # ── Axis extents ──────────────────────────────────────────────────
         # X: delay in µs  (0 → max_delay_µs)
-        # Y: Doppler in Hz (−fs/2 → +fs/2), after fftshift
+        # Y: Doppler in Hz (−max_doppler → +max_doppler)
         delay_max_us  = (num_delay_bins / sample_rate) * 1e6
-        doppler_hz    = sample_rate / 2.0
-        extent = [0, delay_max_us, -doppler_hz, doppler_hz]
+        self._extent = [0, delay_max_us, -max_doppler, max_doppler]
 
         # ── Initial blank image ───────────────────────────────────────────
         dummy = np.zeros((num_doppler_bins, num_delay_bins), dtype=np.float32)
@@ -104,7 +108,7 @@ class _RDCanvas(FigureCanvas):
             dummy,
             aspect='auto',
             origin='lower',
-            extent=extent,
+            extent=self._extent,
             cmap=colormap,
             vmin=0.0, vmax=1.0,
             interpolation='nearest',
@@ -191,16 +195,26 @@ class _RDCanvas(FigureCanvas):
         self._im.set_cmap(name)
         self.draw_idle()
 
+    def set_max_doppler(self, val):
+        """Update the Doppler axis extent at runtime."""
+        self._max_dop = float(val)
+        self._extent[2] = -self._max_dop
+        self._extent[3] =  self._max_dop
+        self._im.set_extent(self._extent)
+        self._ax.set_xlim(self._extent[0], self._extent[1])
+        self._ax.set_ylim(self._extent[2], self._extent[3])
+        self.draw_idle()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Qt widget — canvas + runtime controls
 # ─────────────────────────────────────────────────────────────────────────────
-class _RDWindow(QtWidgets.QWidget):
+class _RDWidget(QtWidgets.QWidget):
 
     def __init__(self, num_doppler_bins, num_delay_bins,
-                 sample_rate, dynamic_range_db, colormap, parent=None):
+                 sample_rate, max_doppler, dynamic_range_db,
+                 colormap, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Range–Doppler Display  [gr-PR]')
         self.setStyleSheet("""
             QWidget  { background: #111; color: #eee; }
             QLabel   { font-size: 10px; }
@@ -216,8 +230,9 @@ class _RDWindow(QtWidgets.QWidget):
 
         # Canvas
         self.canvas = _RDCanvas(num_doppler_bins, num_delay_bins,
-                                sample_rate, dynamic_range_db,
-                                colormap, parent=self)
+                                sample_rate, max_doppler,
+                                dynamic_range_db, colormap,
+                                parent=self)
         layout.addWidget(self.canvas, stretch=1)
 
         # ── Controls ──────────────────────────────────────────────────────
@@ -259,6 +274,9 @@ class _RDWindow(QtWidgets.QWidget):
     def set_colormap(self, name):
         self._cmap.setCurrentText(name)
 
+    def set_max_doppler(self, val):
+        self.canvas.set_max_doppler(val)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GNU Radio sink block
@@ -275,15 +293,16 @@ class rd_plot(gr.sync_block):
     num_doppler_bins : int    — must match caf block
     num_delay_bins   : int    — must match caf block
     sample_rate      : float  — receiver sample rate in Hz
+    max_doppler      : float  — ±Doppler extent in Hz (must match caf block)
     dynamic_range_db : float  — colour scale depth in dB (default 60)
     colormap         : str    — initial matplotlib colormap name
-    parent           : QWidget or None — for embedding in GRC window
     """
 
     def __init__(self,
                  num_doppler_bins=128,
                  num_delay_bins=128,
                  sample_rate=2.4e6,
+                 max_doppler=1000.0,
                  dynamic_range_db=60.0,
                  colormap='inferno'):
 
@@ -300,25 +319,23 @@ class rd_plot(gr.sync_block):
         self._nl = num_delay_bins
 
         # ── Thread bridge ─────────────────────────────────────────────────
-        # Created before the window so the signal exists before any emit.
         self._bridge = _Bridge()
 
-        # ── Qt window ─────────────────────────────────────────────────────
-        # Must be constructed in the Qt main thread.
-        # GRC guarantees QApplication exists before block __init__ runs.
-        self._win = _RDWindow(
+        # ── Qt widget ─────────────────────────────────────────────────────
+        # Do NOT call .show() here — GRC manages widget visibility.
+        # When gui_hint is set, GRC calls pyqwidget() and embeds this
+        # widget in the main window's grid/tab layout.
+        # When gui_hint is empty, GRC shows it as a top-level window.
+        self._win = _RDWidget(
             num_doppler_bins, num_delay_bins,
-            sample_rate, dynamic_range_db, colormap
+            sample_rate, max_doppler, dynamic_range_db, colormap
         )
 
         # QueuedConnection: signal crosses thread boundary via event queue.
-        # The slot (_win.canvas.update_frame) runs in the Qt main thread.
         self._bridge.new_frame.connect(
             self._win.canvas.update_frame,
             QtCore.Qt.QueuedConnection
         )
-
-        self._win.show()
 
     # ── GNU Radio work() ─────────────────────────────────────────────────
     def work(self, input_items, output_items):
@@ -348,3 +365,6 @@ class rd_plot(gr.sync_block):
 
     def set_colormap(self, name):
         self._win.set_colormap(name)
+
+    def set_max_doppler(self, val):
+        self._win.set_max_doppler(val)
