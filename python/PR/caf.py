@@ -46,9 +46,8 @@
 # │    Row d = Doppler bin d, Col l = delay bin l                      │
 # │                                                                     │
 # │  DOPPLER AXIS:                                                      │
-# │    Bins are spaced at fs / num_doppler_bins Hz                     │
-# │    Arranged via fftfreq: 0 … +fs/2, −fs/2 … 0                    │
-# │    fftshift is applied before output so zero-Doppler is centred    │
+# │    Bins are linearly spaced from −max_doppler to +max_doppler Hz   │
+# │    Zero-Doppler is at the centre row — no fftshift needed          │
 # │                                                                     │
 # │  DELAY AXIS:                                                        │
 # │    Bin l corresponds to delay τ = l / fs seconds                   │
@@ -66,7 +65,7 @@
 # ------
 #   Port 0  caf_out — float32 vector, length = num_doppler_bins * num_delay_bins
 #                     Row-major: row = Doppler bin, col = delay bin
-#                     Doppler axis is fftshifted (zero-Doppler at centre row)
+#                     Doppler axis is centred (zero-Doppler at centre row)
 #
 
 import numpy as np
@@ -177,13 +176,10 @@ class caf(gr.sync_block):
             # ── Compute CAF ──────────────────────────────────────────────
             self._compute_caf(ref_w, surv_w)
 
-            # ── fftshift Doppler axis ────────────────────────────────────
-            # Rearranges rows so zero-Doppler is at the centre row,
-            # negative Doppler above, positive below — natural for display.
-            shifted = np.fft.fftshift(self._caf_mat, axes=0)
-
             # ── Flatten and write to output port ─────────────────────────
-            out[produced] = shifted.ravel()
+            # Doppler axis is already centred (linspace from −max to +max),
+            # so no fftshift is needed.
+            out[produced] = self._caf_mat.ravel()
             produced += 1
 
         return produced
