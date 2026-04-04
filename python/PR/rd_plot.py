@@ -42,7 +42,7 @@
 # │  EMBEDDING:                                                         │
 # │    GRC calls pyqwidget() to retrieve the Qt widget and embeds it   │
 # │    in the main window when gui_hint is set.  The block must NOT    │
-# │    call .show() itself — GRC manages widget visibility.            │
+# │    call .show() itself when gui_hint is set.                       │
 # └─────────────────────────────────────────────────────────────────────┘
 #
 # GNU Radio block type: sync_block (vector in, no output — sink)
@@ -317,10 +317,9 @@ class rd_plot(gr.sync_block):
         self._bridge = _Bridge()
 
         # ── Qt widget ─────────────────────────────────────────────────────
-        # Do NOT call .show() here — GRC manages widget visibility.
-        # When gui_hint is set, GRC calls pyqwidget() and embeds this
-        # widget in the main window's grid/tab layout.
-        # When gui_hint is empty, GRC shows it as a top-level window.
+        # When gui_hint is set, GRC calls pyqwidget() and re-parents this
+        # widget into the main window's grid/tab layout.
+        # When gui_hint is empty, it stays as a standalone top-level window.
         self._win = _RDWidget(
             num_doppler_bins, num_delay_bins,
             sample_rate, max_doppler, dynamic_range_db, colormap
@@ -331,6 +330,10 @@ class rd_plot(gr.sync_block):
             self._win.canvas.update_frame,
             QtCore.Qt.QueuedConnection
         )
+
+        # Show as standalone window. If gui_hint is set, GRC will
+        # re-parent and embed this widget into the main window layout.
+        self._win.show()
 
     # ── GNU Radio work() ─────────────────────────────────────────────────
     def work(self, input_items, output_items):
