@@ -46,6 +46,7 @@ if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/gnuradio/grc/blocks" TYPE FILE FILES
     "/home/kristaps/BAK/gr-PR/grc/PR_caf.block.yml"
     "/home/kristaps/BAK/gr-PR/grc/PR_rd_plot.block.yml"
+    "/home/kristaps/BAK/gr-PR/grc/PR_DDC.block.yml"
     )
 endif()
 

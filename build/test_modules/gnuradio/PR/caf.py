@@ -37,18 +37,18 @@
 # │       This is the standard Wiener–Khinchin cross-correlation.      │
 # │       Complexity: O(N log N) vs O(N²) for direct computation       │
 # │                                                                     │
-# │    4. MAGNITUDE SQUARED                                             │
-# │       CAF[d, :] = |R[τ]|²  for τ = 0 … num_delay_bins − 1        │
+# │    4. COMPLEX OUTPUT                                                │
+# │       CAF[d, :] = R[τ]  for τ = 0 … num_delay_bins − 1           │
+# │       Complex values preserve phase for downstream DOA processing  │
 # │                                                                     │
 # │  OUTPUT SHAPE:                                                      │
-# │    Matrix:  (num_doppler_bins, num_delay_bins)  — float32          │
+# │    Matrix:  (num_doppler_bins, num_delay_bins)  — complex64        │
 # │    Flattened to 1D vector for GNU Radio stream transport           │
 # │    Row d = Doppler bin d, Col l = delay bin l                      │
 # │                                                                     │
 # │  DOPPLER AXIS:                                                      │
-# │    Bins are spaced at fs / num_doppler_bins Hz                     │
-# │    Arranged via fftfreq: 0 … +fs/2, −fs/2 … 0                    │
-# │    fftshift is applied before output so zero-Doppler is centred    │
+# │    Bins are linearly spaced from −max_doppler to +max_doppler Hz   │
+# │    Zero-Doppler is at the centre row — no fftshift needed          │
 # │                                                                     │
 # │  DELAY AXIS:                                                        │
 # │    Bin l corresponds to delay τ = l / fs seconds                   │
@@ -64,9 +64,10 @@
 #
 # Output
 # ------
-#   Port 0  caf_out — float32 vector, length = num_doppler_bins * num_delay_bins
+#   Port 0  caf_out — complex64 vector, length = num_doppler_bins * num_delay_bins
 #                     Row-major: row = Doppler bin, col = delay bin
-#                     Doppler axis is fftshifted (zero-Doppler at centre row)
+#                     Doppler axis is centred (zero-Doppler at centre row)
+#                     Phase preserved for downstream DOA processing
 #
 
 import numpy as np
@@ -95,7 +96,8 @@ class caf(gr.sync_block):
                  num_doppler_bins=128,
                  num_delay_bins=128,
                  cpi_skip=1,
-                 sample_rate=2.4e6):
+                 sample_rate=2.4e6,
+                 max_doppler=1000.0):
 
         # Validate
         if num_delay_bins > cpi_samp:
@@ -109,7 +111,7 @@ class caf(gr.sync_block):
                 np.dtype((np.complex64, cpi_samp)),  # port 1: surveillance
             ],
             out_sig=[
-                np.dtype((np.float32, num_doppler_bins * num_delay_bins)),
+                np.dtype((np.complex64, num_doppler_bins * num_delay_bins)),
             ]
         )
 
@@ -117,6 +119,7 @@ class caf(gr.sync_block):
         self._nd  = num_doppler_bins
         self._nl  = num_delay_bins
         self._fs  = sample_rate
+        self._max_doppler = float(max_doppler)
         self._skip = max(1, int(cpi_skip))
         self._skip_ctr = 0
 
@@ -132,7 +135,7 @@ class caf(gr.sync_block):
         #
         # Using fftfreq ensures the Doppler axis is symmetric around zero
         # after fftshift (applied later on the output matrix).
-        doppler_freqs = np.fft.fftfreq(num_doppler_bins, d=1.0 / sample_rate)
+        doppler_freqs = np.linspace(-max_doppler, max_doppler, num_doppler_bins)
         t = np.arange(cpi_samp, dtype=np.float32) / sample_rate
         self._doppler_tones = np.exp(
             1j * 2.0 * np.pi
@@ -141,9 +144,9 @@ class caf(gr.sync_block):
         ).astype(np.complex64)              # → (nd, N)
 
         # ── Pre-allocate output matrix ───────────────────────────────────
-        # Avoids heap allocation on every CPI.
+        # Complex output preserves phase for downstream DOA processing.
         self._caf_mat = np.zeros((num_doppler_bins, num_delay_bins),
-                                 dtype=np.float32)
+                                 dtype=np.complex64)
 
     # ────────────────────────────────────────────────────────────────────
     def work(self, input_items, output_items):
@@ -176,13 +179,10 @@ class caf(gr.sync_block):
             # ── Compute CAF ──────────────────────────────────────────────
             self._compute_caf(ref_w, surv_w)
 
-            # ── fftshift Doppler axis ────────────────────────────────────
-            # Rearranges rows so zero-Doppler is at the centre row,
-            # negative Doppler above, positive below — natural for display.
-            shifted = np.fft.fftshift(self._caf_mat, axes=0)
-
             # ── Flatten and write to output port ─────────────────────────
-            out[produced] = shifted.ravel()
+            # Doppler axis is already centred (linspace from −max to +max),
+            # so no fftshift is needed.
+            out[produced] = self._caf_mat.ravel()
             produced += 1
 
         return produced
@@ -190,28 +190,25 @@ class caf(gr.sync_block):
     # ────────────────────────────────────────────────────────────────────
     def _compute_caf(self, ref_w, surv_w):
         """
-        Core CAF computation. Writes result into self._caf_mat.
+        Core CAF computation (vectorised). Writes result into self._caf_mat.
 
-        Steps per Doppler bin d
-        -----------------------
-        1.  s_d = surv_w * tone_d          — Doppler shift surveillance
-        2.  R   = IFFT(FFT(ref) * conj(FFT(s_d)))  — cross-correlation
-        3.  caf_mat[d, :] = |R[0:nl]|²    — magnitude squared, take nl lags
+        All Doppler bins are processed in a single batch via broadcasting:
+          S_all = surv_w[newaxis, :] * doppler_tones   — (nd, N)
+        Then a batched FFT cross-correlation produces complex output whose
+        phase is preserved for downstream DOA processing.
         """
-        # Pre-compute FFT of windowed reference (shared across all Doppler bins)
-        REF = np.fft.fft(ref_w)            # (N,) complex64
+        # Vectorised Doppler shift: broadcast (1, N) * (nd, N) → (nd, N)
+        S_all = surv_w[np.newaxis, :] * self._doppler_tones
 
-        for d in range(self._nd):
-            # Step 1: Doppler shift
-            s_d = surv_w * self._doppler_tones[d]
+        # Batched FFT cross-correlation across all Doppler bins at once
+        REF = np.fft.fft(ref_w)                         # (N,)  complex64
+        R_all = np.fft.ifft(
+            np.fft.fft(S_all, axis=1) * np.conj(REF)[np.newaxis, :],
+            axis=1,
+        )                                                # (nd, N) complex
 
-            # Step 2: FFT cross-correlation
-            #   IFFT( FFT(ref) · FFT*(surv_shifted) )
-            #   = circular cross-correlation in time domain
-            R = np.fft.ifft(REF * np.conj(np.fft.fft(s_d)))
-
-            # Step 3: |·|², keep first num_delay_bins lags (positive delays)
-            self._caf_mat[d, :] = (np.abs(R[:self._nl]) ** 2).astype(np.float32)
+        # Keep first num_delay_bins lags (positive delays), preserve complex
+        self._caf_mat[:] = R_all[:, :self._nl].astype(np.complex64)
 
     # ────────────────────────────────────────────────────────────────────
     # Runtime-adjustable parameters (wirable from GRC variable blocks)
@@ -222,3 +219,4 @@ class caf(gr.sync_block):
     def get_num_doppler_bins(self): return self._nd
     def get_num_delay_bins(self):   return self._nl
     def get_sample_rate(self):      return self._fs
+    def get_max_doppler(self):      return self._max_doppler

@@ -22,4 +22,5 @@ except ModuleNotFoundError:
 # import any pure python here
 from .caf import caf
 from .rd_plot import rd_plot
+from .DDC import DDC
 #

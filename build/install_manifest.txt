@@ -3,11 +3,15 @@
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/__init__.py
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/caf.py
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/rd_plot.py
+/usr/local/lib/python3.10/dist-packages/gnuradio/PR/DDC.py
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/__init__.pyc
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/caf.pyc
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/rd_plot.pyc
+/usr/local/lib/python3.10/dist-packages/gnuradio/PR/DDC.pyc
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/__init__.pyo
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/caf.pyo
 /usr/local/lib/python3.10/dist-packages/gnuradio/PR/rd_plot.pyo
+/usr/local/lib/python3.10/dist-packages/gnuradio/PR/DDC.pyo
 /usr/local/share/gnuradio/grc/blocks/PR_caf.block.yml
 /usr/local/share/gnuradio/grc/blocks/PR_rd_plot.block.yml
+/usr/local/share/gnuradio/grc/blocks/PR_DDC.block.yml

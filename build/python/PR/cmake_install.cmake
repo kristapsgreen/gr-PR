@@ -47,6 +47,7 @@ if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_
     "/home/kristaps/BAK/gr-PR/python/PR/__init__.py"
     "/home/kristaps/BAK/gr-PR/python/PR/caf.py"
     "/home/kristaps/BAK/gr-PR/python/PR/rd_plot.py"
+    "/home/kristaps/BAK/gr-PR/python/PR/DDC.py"
     )
 endif()
 
@@ -55,9 +56,11 @@ if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_
     "/home/kristaps/BAK/gr-PR/build/python/PR/__init__.pyc"
     "/home/kristaps/BAK/gr-PR/build/python/PR/caf.pyc"
     "/home/kristaps/BAK/gr-PR/build/python/PR/rd_plot.pyc"
+    "/home/kristaps/BAK/gr-PR/build/python/PR/DDC.pyc"
     "/home/kristaps/BAK/gr-PR/build/python/PR/__init__.pyo"
     "/home/kristaps/BAK/gr-PR/build/python/PR/caf.pyo"
     "/home/kristaps/BAK/gr-PR/build/python/PR/rd_plot.pyo"
+    "/home/kristaps/BAK/gr-PR/build/python/PR/DDC.pyo"
     )
 endif()
 
