@@ -24,7 +24,8 @@ GR_PYTHON_INSTALL(
     __init__.py
     caf.py
     rd_plot.py
-    DDC.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/PR
+    DDC.py
+    cu_caf.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/PR
 )
 
 ########################################################################
