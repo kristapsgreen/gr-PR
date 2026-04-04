@@ -59,7 +59,7 @@ parameters:
 
 inputs:
   - label: caf_in
-    dtype: float
+    dtype: complex
     vlen: ${num_doppler_bins * num_delay_bins}
 
 outputs: []
@@ -70,8 +70,9 @@ documentation: |-
     Renders a live Range-Doppler map from the CAF block output.
 
     INPUT
-      caf_in : float32 vector, len = num_doppler_bins × num_delay_bins
+      caf_in : complex64 vector, len = num_doppler_bins × num_delay_bins
       Connect directly from the PR CAF block output.
+      Display uses magnitude only; phase available for DOA.
 
     PARAMETERS
       num_doppler_bins  — must match CAF block

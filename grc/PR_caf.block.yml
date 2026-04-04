@@ -58,7 +58,7 @@ inputs:
 
 outputs:
   - label: caf_out
-    dtype: float
+    dtype: complex
     vlen: ${num_doppler_bins * num_delay_bins}
 
 documentation: |-
@@ -72,8 +72,9 @@ documentation: |-
       Both fed from stream_to_vector blocks (length = cpi_samp).
 
     OUTPUT
-      Flattened float32 magnitude matrix: num_doppler_bins × num_delay_bins
-      Row-major. Doppler axis is fftshifted (zero-Doppler at centre row).
+      Flattened complex64 CAF matrix: num_doppler_bins × num_delay_bins
+      Row-major. Doppler axis centred (zero-Doppler at centre row).
+      Phase preserved for downstream DOA processing.
       Connect directly to PR RD Plot block.
 
     PARAMETERS

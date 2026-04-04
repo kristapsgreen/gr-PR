@@ -7,7 +7,7 @@
 # ┌─────────────────────────────────────────────────────────────────────┐
 # │  ALGORITHM: Range-Doppler Map Rendering                            │
 # │                                                                     │
-# │  Receives the flattened CAF magnitude matrix from the caf block    │
+# │  Receives the flattened complex CAF matrix from the caf block      │
 # │  and renders it as a 2D intensity plot (Range-Doppler map).        │
 # │                                                                     │
 # │  AXES INTERPRETATION:                                               │
@@ -49,8 +49,9 @@
 #
 # Input
 # -----
-#   Port 0  caf_in — float32 vector, length = num_doppler_bins * num_delay_bins
+#   Port 0  caf_in — complex64 vector, length = num_doppler_bins * num_delay_bins
 #                    Row-major, Doppler axis ordered −max to +max (linspace)
+#                    Display uses magnitude only; phase available for DOA
 #
 
 import time
@@ -150,10 +151,10 @@ class _RDCanvas(FigureCanvas):
     # ── Called only from Qt GUI thread via QueuedConnection ──────────────
     def update_frame(self, matrix: np.ndarray):
         """
-        Normalise and render one CAF magnitude matrix.
+        Normalise and render one CAF matrix.
 
-        matrix shape: (num_doppler_bins, num_delay_bins), dtype float32
-        Values are |CAF|² (linear power).
+        matrix shape: (num_doppler_bins, num_delay_bins), dtype complex64
+        Display uses |CAF|² (magnitude squared); phase is discarded here.
         """
         # ── Timing ───────────────────────────────────────────────────────
         now = time.perf_counter()
@@ -162,8 +163,9 @@ class _RDCanvas(FigureCanvas):
         self._last_time = now
 
         eps = 1e-30
-        # Convert to dB
-        mat_db = 10.0 * np.log10(matrix + eps)
+        # Extract magnitude squared from complex CAF, then convert to dB
+        mag_sq = np.abs(matrix) ** 2
+        mat_db = 10.0 * np.log10(mag_sq + eps)
         peak   = mat_db.max()
 
         # Normalise: map [peak−dyn_db … peak] → [0 … 1]
@@ -278,8 +280,8 @@ class rd_plot(gr.sync_block):
     """
     Range-Doppler Qt Display Sink  —  gr-PR
 
-    Receives the flattened float32 CAF magnitude output from the caf block
-    and renders a live Range-Doppler map in a Qt5 window.
+    Receives the flattened complex64 CAF output from the caf block
+    and renders a live Range-Doppler map in a Qt5 window (magnitude only).
 
     Parameters
     ----------
@@ -303,7 +305,7 @@ class rd_plot(gr.sync_block):
             self,
             name="PR RD Plot",
             in_sig=[
-                np.dtype((np.float32, num_doppler_bins * num_delay_bins)),
+                np.dtype((np.complex64, num_doppler_bins * num_delay_bins)),
             ],
             out_sig=[]   # sink — no output
         )
