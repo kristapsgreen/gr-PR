@@ -54,7 +54,11 @@
 #                    Display uses magnitude only; phase available for DOA
 #
 
+import csv
+import os
 import time
+from datetime import datetime
+
 import numpy as np
 import gnuradio.gr as gr
 
@@ -143,8 +147,18 @@ class _RDCanvas(FigureCanvas):
                    linestyle='--', alpha=0.6)
 
         # ── Performance metrics ──────────────────────────────────────────
-        self._last_time    = None
-        self._frame_dt_ms  = 0.0
+        self._last_time      = None
+        self._frame_dt_ms    = 0.0
+        self._render_time_ms = 0.0
+        self._frame_num      = 0
+
+        # ── CSV recording state ──────────────────────────────────────────
+        # _csv_path is None when not recording. When set, update_frame
+        # appends one row per frame (open → write → close each time for
+        # crash safety). _metrics_cb is a callable returning a dict of
+        # pc_* metrics from the parent gr block; set via attach_block().
+        self._csv_path    = None
+        self._metrics_cb  = None
 
         self.draw()
 
@@ -156,11 +170,11 @@ class _RDCanvas(FigureCanvas):
         matrix shape: (num_doppler_bins, num_delay_bins), dtype complex64
         Display uses |CAF|² (magnitude squared); phase is discarded here.
         """
-        # ── Timing ───────────────────────────────────────────────────────
-        now = time.perf_counter()
+        # ── Timing: frame interval ───────────────────────────────────────
+        render_start = time.perf_counter()
         if self._last_time is not None:
-            self._frame_dt_ms = (now - self._last_time) * 1e3
-        self._last_time = now
+            self._frame_dt_ms = (render_start - self._last_time) * 1e3
+        self._last_time = render_start
 
         eps = 1e-30
         # Extract magnitude squared from complex CAF, then convert to dB
@@ -182,6 +196,14 @@ class _RDCanvas(FigureCanvas):
         )
         self.draw_idle()  # thread-safe redraw request
 
+        # ── Timing: render duration ──────────────────────────────────────
+        self._render_time_ms = (time.perf_counter() - render_start) * 1e3
+        self._frame_num += 1
+
+        # ── CSV logging (crash-safe: open/write/close per row) ───────────
+        if self._csv_path is not None:
+            self._write_csv_row(peak)
+
     # ── Runtime setters ───────────────────────────────────────────────────
     def set_dynamic_range(self, val):
         self._dyn_db = float(val)
@@ -200,6 +222,74 @@ class _RDCanvas(FigureCanvas):
         self._ax.set_ylim(self._extent[2], self._extent[3])
         self.draw_idle()
 
+    # ── CSV recording ────────────────────────────────────────────────────
+    # The GR scheduler writes frames very infrequently (a few Hz up to
+    # maybe 30 Hz) so open/write/close per row is cheap and guarantees
+    # the file is flushed to disk even if the flowgraph crashes or is
+    # killed mid-run — matches user's requirement for crash-safe logging.
+    _CSV_HEADER = [
+        'timestamp_iso',
+        'frame_num',
+        'frame_dt_ms',       # interval between successive frames
+        'render_time_ms',    # time spent inside update_frame (normalise + redraw)
+        'peak_db',           # peak of |CAF|² in dB
+        'pc_work_time_avg_us',      # GR pc_* — requires ENABLE_PERFORMANCE_COUNTERS
+        'pc_input_buf_full_avg',    # avg fullness of caf_in buffer (0..1)
+        'pc_throughput_avg',        # items/sec
+        'nitems_read',              # cumulative items consumed on port 0
+    ]
+
+    def attach_block(self, metrics_cb):
+        """Register a callback returning {pc_work_time_avg_us, ...} dict.
+        Called by the parent gr block to plumb pc_* counters through."""
+        self._metrics_cb = metrics_cb
+
+    def start_recording(self, path):
+        """Create the CSV file, write the header, and begin logging."""
+        # Ensure parent dir exists
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, 'w', newline='') as f:
+            csv.writer(f).writerow(self._CSV_HEADER)
+        self._csv_path  = path
+        self._frame_num = 0  # reset so rows are 1, 2, 3, ... per run
+
+    def stop_recording(self):
+        self._csv_path = None
+
+    def is_recording(self):
+        return self._csv_path is not None
+
+    def _write_csv_row(self, peak_db):
+        """Append one row for the most recent frame. Called from update_frame."""
+        if self._metrics_cb is not None:
+            try:
+                m = self._metrics_cb()
+            except Exception:
+                m = {}
+        else:
+            m = {}
+        row = [
+            datetime.now().isoformat(timespec='milliseconds'),
+            self._frame_num,
+            f'{self._frame_dt_ms:.3f}',
+            f'{self._render_time_ms:.3f}',
+            f'{peak_db:.2f}',
+            m.get('pc_work_time_avg_us', ''),
+            m.get('pc_input_buf_full_avg', ''),
+            m.get('pc_throughput_avg', ''),
+            m.get('nitems_read', ''),
+        ]
+        try:
+            with open(self._csv_path, 'a', newline='') as f:
+                csv.writer(f).writerow(row)
+        except OSError as e:
+            # Disk full, permission error, etc. — stop recording rather
+            # than spamming exceptions into the Qt event loop.
+            print(f'[rd_plot] CSV write failed, stopping recording: {e}')
+            self._csv_path = None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Qt widget — canvas + runtime controls
@@ -217,6 +307,10 @@ class _RDWidget(QtWidgets.QWidget):
             QSlider::handle:horizontal { background:#00e5ff; width:12px; height:12px;
                                          margin:-4px 0; border-radius:6px; }
             QComboBox { background:#222; border:1px solid #444; padding:2px 6px; }
+            QPushButton { background:#222; border:1px solid #444; padding:3px 10px; }
+            QPushButton:hover { background:#2a2a2a; }
+            QPushButton[recording="true"] { background:#8b1a1a; border:1px solid #c33;
+                                            color:#fff; font-weight:bold; }
         """)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -259,6 +353,13 @@ class _RDWidget(QtWidgets.QWidget):
         ctrl.addWidget(self._cmap)
 
         ctrl.addStretch()
+
+        # Record CSV toggle button — lives on the right of the control bar
+        self._rec_btn = QtWidgets.QPushButton('● Record CSV')
+        self._rec_btn.setCheckable(True)
+        self._rec_btn.clicked.connect(self._on_record_toggled)
+        ctrl.addWidget(self._rec_btn)
+
         layout.addLayout(ctrl)
 
         self.resize(880, 580)
@@ -271,6 +372,41 @@ class _RDWidget(QtWidgets.QWidget):
 
     def set_max_doppler(self, val):
         self.canvas.set_max_doppler(val)
+
+    # ── Record button handler ────────────────────────────────────────────
+    def _on_record_toggled(self, checked):
+        """Toggle CSV recording. Prompts for path on start via file dialog."""
+        if checked:
+            # Default filename: rd_plot_YYYYMMDD_HHMMSS.csv in cwd
+            default_name = 'rd_plot_{}.csv'.format(
+                datetime.now().strftime('%Y%m%d_%H%M%S')
+            )
+            default_path = os.path.join(os.getcwd(), default_name)
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, 'Record metrics to CSV', default_path,
+                'CSV files (*.csv);;All files (*)'
+            )
+            if not path:
+                # User cancelled — untick the button without recording
+                self._rec_btn.setChecked(False)
+                return
+            try:
+                self.canvas.start_recording(path)
+            except OSError as e:
+                QtWidgets.QMessageBox.warning(
+                    self, 'Record failed', f'Could not create {path}:\n{e}'
+                )
+                self._rec_btn.setChecked(False)
+                return
+            self._rec_btn.setText('■ Stop  ({})'.format(os.path.basename(path)))
+        else:
+            self.canvas.stop_recording()
+            self._rec_btn.setText('● Record CSV')
+
+        # Re-apply stylesheet so the [recording="true"] selector kicks in
+        self._rec_btn.setProperty('recording', 'true' if checked else 'false')
+        self._rec_btn.style().unpolish(self._rec_btn)
+        self._rec_btn.style().polish(self._rec_btn)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -331,9 +467,32 @@ class rd_plot(gr.sync_block):
             QtCore.Qt.QueuedConnection
         )
 
+        # Plumb GR performance counters to the canvas so the CSV logger
+        # can record them. pc_* only returns non-zero values when GNU
+        # Radio was built with -DENABLE_PERFORMANCE_COUNTERS=ON; when
+        # that flag is off the methods still exist and return 0.0.
+        self._win.canvas.attach_block(self._collect_metrics)
+
         # Show as standalone window. If gui_hint is set, GRC will
         # re-parent and embed this widget into the main window layout.
         self._win.show()
+
+    # ── Performance counter collection ───────────────────────────────────
+    def _collect_metrics(self):
+        """Return a dict of GR pc_* counters for the CSV logger.
+        Wrapped in try/except so unsupported counters (depending on GR
+        build/version) just yield empty cells rather than crashing."""
+        def _safe(fn, *args):
+            try:
+                return fn(*args)
+            except Exception:
+                return ''
+        return {
+            'pc_work_time_avg_us':   _safe(self.pc_work_time_avg),
+            'pc_input_buf_full_avg': _safe(self.pc_input_buffers_full_avg, 0),
+            'pc_throughput_avg':     _safe(self.pc_throughput_avg),
+            'nitems_read':           _safe(self.nitems_read, 0),
+        }
 
     # ── GNU Radio work() ─────────────────────────────────────────────────
     def work(self, input_items, output_items):
