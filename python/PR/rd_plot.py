@@ -78,9 +78,7 @@ from matplotlib.figure import Figure
 # Signal bridge: safely passes numpy frames from GR thread → Qt GUI thread
 # ─────────────────────────────────────────────────────────────────────────────
 class _Bridge(QObject):
-    # Payload is a dict: {matrix, batch_size, pos_in_batch, batch_index,
-    #                     batch_dt_ms, work_batch_time_ms}
-    new_frame = pyqtSignal(object)
+    new_frame = pyqtSignal(np.ndarray)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -163,13 +161,6 @@ class _RDCanvas(FigureCanvas):
         self._frame_dt_ms    = 0.0
         self._render_time_ms = 0.0
         self._frame_num      = 0
-        # Batch metadata — last values received from the GR thread.
-        # Same value repeats across all rows of the same work() call.
-        self._batch_size         = 0
-        self._pos_in_batch       = 0
-        self._batch_index        = 0
-        self._batch_dt_ms        = 0.0
-        self._work_batch_time_ms = 0.0
 
         # ── CSV recording state ──────────────────────────────────────────
         # _csv_path is None when not recording. When set, update_frame
@@ -182,25 +173,8 @@ class _RDCanvas(FigureCanvas):
         self.draw()
 
     # ── Called only from Qt GUI thread via QueuedConnection ──────────────
-    def update_frame(self, payload):
-        """
-        Normalise and render one CAF matrix.
-
-        payload : dict emitted by the rd_plot block, carrying:
-            matrix             : (nd, nl) complex64 CAF frame
-            batch_size         : n_cpis passed to this work() call
-            pos_in_batch       : 0..batch_size-1 — index within the batch
-            batch_index        : monotonic counter of work() invocations
-            batch_dt_ms        : time since the previous work() call's start
-            work_batch_time_ms : total wall time inside that work() call
-        """
-        matrix = payload['matrix']
-        self._batch_size         = payload.get('batch_size', 0)
-        self._pos_in_batch       = payload.get('pos_in_batch', 0)
-        self._batch_index        = payload.get('batch_index', 0)
-        self._batch_dt_ms        = payload.get('batch_dt_ms', 0.0)
-        self._work_batch_time_ms = payload.get('work_batch_time_ms', 0.0)
-
+    def update_frame(self, matrix: np.ndarray):
+        """Normalise and render one CAF matrix."""
         # ── Timing: frame interval ───────────────────────────────────────
         render_start = time.perf_counter()
         if self._last_time is not None:
@@ -279,16 +253,6 @@ class _RDCanvas(FigureCanvas):
         'frame_dt_ms',       # interval between successive frames seen by Qt thread
         'render_time_ms',    # time spent inside update_frame (normalise + redraw)
         'peak_db',           # peak of |CAF|² in dB
-        # ── Batch-level metrics (from the GR scheduler's work() call) ────
-        # When the upstream block is slow, the scheduler gives work() multiple
-        # frames at once. Same batch_* values repeat for all rows of one batch,
-        # so you can tell batched from unbatched delivery and compute the
-        # true arrival period (batch_dt_ms) independent of intra-batch bursts.
-        'batch_index',       # monotonic work() call counter
-        'batch_size',        # n_cpis in the current work() call
-        'pos_in_batch',      # 0 .. batch_size-1
-        'batch_dt_ms',       # time since the previous work() call's start
-        'work_batch_time_ms',# total wall time inside the emitting work() call
         # ── GR performance counters ──────────────────────────────────────
         'pc_work_time_avg_us',      # GR pc_* — requires ENABLE_PERFORMANCE_COUNTERS
         'pc_input_buf_full_avg',    # avg fullness of caf_in buffer (0..1)
@@ -333,11 +297,6 @@ class _RDCanvas(FigureCanvas):
             f'{self._frame_dt_ms:.3f}',
             f'{self._render_time_ms:.3f}',
             f'{peak_db:.2f}',
-            self._batch_index,
-            self._batch_size,
-            self._pos_in_batch,
-            f'{self._batch_dt_ms:.3f}',
-            f'{self._work_batch_time_ms:.3f}',
             m.get('pc_work_time_avg_us', ''),
             m.get('pc_input_buf_full_avg', ''),
             m.get('pc_throughput_avg', ''),
@@ -522,15 +481,6 @@ class rd_plot(gr.sync_block):
         self._nd = num_doppler_bins
         self._nl = num_delay_bins
 
-        # ── Batch-tracking state (GR thread) ──────────────────────────────
-        # These live on the block and get stamped into every payload dict
-        # before emit, so the Qt thread can log them to CSV.
-        self._batch_index         = 0
-        self._last_work_start_ts  = None
-        # work_batch_time_ms reports the PREVIOUS batch's duration because
-        # we emit payloads mid-work() (before the current batch ends).
-        self._prev_work_time_ms   = 0.0
-
         # ── Thread bridge ─────────────────────────────────────────────────
         self._bridge = _Bridge()
 
@@ -584,41 +534,12 @@ class rd_plot(gr.sync_block):
         Emits each frame to the Qt thread via the bridge signal.
         .copy() is essential — prevents the scheduler from reusing the
         buffer before Qt has rendered it.
-
-        Each emitted payload is a dict carrying the frame matrix plus
-        batch metadata so the CSV logger on the Qt side can distinguish
-        genuinely slow arrivals from bursty scheduler batching.
         """
-        work_start = time.perf_counter()
-        frames = input_items[0]   # shape: (n_cpis, nd * nl)
-        n_cpis = len(frames)
-
-        # Time between the START of consecutive work() calls. This is the
-        # *true* arrival period: frames within one batch emit back-to-back
-        # through the Qt queue, so frame_dt_ms on the Qt side can collapse
-        # toward zero for intra-batch rows even when upstream is slow.
-        if self._last_work_start_ts is not None:
-            batch_dt_ms = (work_start - self._last_work_start_ts) * 1e3
-        else:
-            batch_dt_ms = 0.0
-        self._last_work_start_ts = work_start
-
-        self._batch_index += 1
-
-        for i, flat in enumerate(frames):
+        frames = input_items[0]   # shape: (n, nd * nl)
+        for flat in frames:
             matrix = flat.reshape(self._nd, self._nl).copy()
-            self._bridge.new_frame.emit({
-                'matrix':             matrix,
-                'batch_size':         n_cpis,
-                'pos_in_batch':       i,
-                'batch_index':        self._batch_index,
-                'batch_dt_ms':        batch_dt_ms,
-                # Previous batch's duration — current one isn't done yet.
-                'work_batch_time_ms': self._prev_work_time_ms,
-            })
-
-        self._prev_work_time_ms = (time.perf_counter() - work_start) * 1e3
-        return n_cpis
+            self._bridge.new_frame.emit(matrix)
+        return len(frames)
 
     # ── GRC integration ───────────────────────────────────────────────────
     def pyqwidget(self):

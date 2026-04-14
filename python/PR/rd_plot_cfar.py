@@ -118,9 +118,7 @@ def _ca_cfar_2d(power, train_r, train_d, guard_r, guard_d, pfa):
 # Signal bridge: GR thread → Qt GUI thread
 # ─────────────────────────────────────────────────────────────────────────────
 class _Bridge(QObject):
-    # Payload is a dict: {matrix, batch_size, pos_in_batch, batch_index,
-    #                     batch_dt_ms, work_batch_time_ms}
-    new_frame = pyqtSignal(object)
+    new_frame = pyqtSignal(np.ndarray)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -203,13 +201,6 @@ class _RDCfarCanvas(FigureCanvas):
         self._cfar_time_ms   = 0.0
         self._frame_num      = 0
         self._n_detections   = 0
-        # Batch metadata — last values received from the GR thread.
-        # Same value repeats across all rows of the same work() call.
-        self._batch_size         = 0
-        self._pos_in_batch       = 0
-        self._batch_index        = 0
-        self._batch_dt_ms        = 0.0
-        self._work_batch_time_ms = 0.0
 
         # ── CSV recording ────────────────────────────────────────────────
         self._csv_path   = None
@@ -218,23 +209,7 @@ class _RDCfarCanvas(FigureCanvas):
         self.draw()
 
     # ── Called only from Qt GUI thread via QueuedConnection ──────────────
-    def update_frame(self, payload):
-        """
-        Render one CAF matrix + its CFAR detection mask.
-
-        payload : dict emitted by the rd_plot_cfar block — see rd_plot.py
-            for field descriptions. Batch metadata is stamped into the CSV
-            alongside the per-frame render / CFAR timings so the arrival
-            pattern of the scheduler can be diagnosed (batching vs true
-            steady-state frame period).
-        """
-        matrix = payload['matrix']
-        self._batch_size         = payload.get('batch_size', 0)
-        self._pos_in_batch       = payload.get('pos_in_batch', 0)
-        self._batch_index        = payload.get('batch_index', 0)
-        self._batch_dt_ms        = payload.get('batch_dt_ms', 0.0)
-        self._work_batch_time_ms = payload.get('work_batch_time_ms', 0.0)
-
+    def update_frame(self, matrix: np.ndarray):
         render_start = time.perf_counter()
         if self._last_time is not None:
             self._frame_dt_ms = (render_start - self._last_time) * 1e3
@@ -331,14 +306,6 @@ class _RDCfarCanvas(FigureCanvas):
         'timestamp_iso', 'frame_num',
         'frame_dt_ms', 'render_time_ms', 'cfar_time_ms',
         'peak_db', 'n_detections',
-        # ── Batch-level metrics (from the GR scheduler's work() call) ────
-        # When the upstream block is slow the scheduler hands work() several
-        # frames at once; same batch_* values repeat across all rows of one
-        # batch, so you can see batching vs true steady-state arrivals and
-        # compute the true arrival period (batch_dt_ms) independent of
-        # intra-batch bursts through the Qt queue.
-        'batch_index', 'batch_size', 'pos_in_batch',
-        'batch_dt_ms', 'work_batch_time_ms',
         'pc_work_time_avg_us', 'pc_input_buf_full_avg',
         'pc_throughput_avg', 'nitems_read',
     ]
@@ -377,11 +344,6 @@ class _RDCfarCanvas(FigureCanvas):
             f'{self._cfar_time_ms:.3f}',
             f'{peak_db:.2f}',
             self._n_detections,
-            self._batch_index,
-            self._batch_size,
-            self._pos_in_batch,
-            f'{self._batch_dt_ms:.3f}',
-            f'{self._work_batch_time_ms:.3f}',
             m.get('pc_work_time_avg_us', ''),
             m.get('pc_input_buf_full_avg', ''),
             m.get('pc_throughput_avg', ''),
@@ -576,15 +538,6 @@ class rd_plot_cfar(gr.sync_block):
         self._nd = num_doppler_bins
         self._nl = num_delay_bins
 
-        # ── Batch-tracking state (GR thread) ──────────────────────────────
-        # Stamped into every payload dict before emit so the Qt-side CSV
-        # logger can distinguish batched vs steady-state delivery.
-        self._batch_index        = 0
-        self._last_work_start_ts = None
-        # work_batch_time_ms reports the PREVIOUS batch's duration because
-        # we emit payloads mid-work() (before the current batch ends).
-        self._prev_work_time_ms  = 0.0
-
         cfar_params = dict(
             train_r=int(cfar_train_range),
             train_d=int(cfar_train_doppler),
@@ -627,36 +580,11 @@ class rd_plot_cfar(gr.sync_block):
 
     # ── GNU Radio work() ─────────────────────────────────────────────────
     def work(self, input_items, output_items):
-        """
-        Emits each frame to the Qt thread with batch metadata so the CSV
-        logger can separate scheduler-driven batching from genuine slow
-        arrivals.
-        """
-        work_start = time.perf_counter()
         frames = input_items[0]
-        n_cpis = len(frames)
-
-        if self._last_work_start_ts is not None:
-            batch_dt_ms = (work_start - self._last_work_start_ts) * 1e3
-        else:
-            batch_dt_ms = 0.0
-        self._last_work_start_ts = work_start
-
-        self._batch_index += 1
-
-        for i, flat in enumerate(frames):
+        for flat in frames:
             matrix = flat.reshape(self._nd, self._nl).copy()
-            self._bridge.new_frame.emit({
-                'matrix':             matrix,
-                'batch_size':         n_cpis,
-                'pos_in_batch':       i,
-                'batch_index':        self._batch_index,
-                'batch_dt_ms':        batch_dt_ms,
-                'work_batch_time_ms': self._prev_work_time_ms,
-            })
-
-        self._prev_work_time_ms = (time.perf_counter() - work_start) * 1e3
-        return n_cpis
+            self._bridge.new_frame.emit(matrix)
+        return len(frames)
 
     # ── GRC integration ───────────────────────────────────────────────────
     def pyqwidget(self):
