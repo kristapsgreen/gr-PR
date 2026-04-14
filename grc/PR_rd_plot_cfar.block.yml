@@ -13,6 +13,8 @@ templates:
         max_doppler=${max_doppler},
         dynamic_range_db=${dynamic_range_db},
         colormap=${colormap},
+        baseline_m=${baseline_m},
+        carrier_freq_hz=${carrier_freq_hz},
         cfar_train_range=${cfar_train_range},
         cfar_train_doppler=${cfar_train_doppler},
         cfar_guard_range=${cfar_guard_range},
@@ -23,6 +25,8 @@ templates:
     - set_dynamic_range(${dynamic_range_db})
     - set_colormap(${colormap})
     - set_max_doppler(${max_doppler})
+    - set_baseline(${baseline_m})
+    - set_carrier_freq(${carrier_freq_hz})
     - set_pfa(${cfar_pfa})
     - set_train_cells(${cfar_train_range}, ${cfar_train_doppler})
     - set_guard_cells(${cfar_guard_range}, ${cfar_guard_doppler})
@@ -47,6 +51,16 @@ parameters:
     label: Max Doppler (Hz)
     dtype: float
     default: '1000.0'
+
+  - id: baseline_m
+    label: Baseline L (m)
+    dtype: float
+    default: '0.0'
+
+  - id: carrier_freq_hz
+    label: Carrier Freq (Hz)
+    dtype: float
+    default: '510e6'
 
   - id: dynamic_range_db
     label: Dynamic Range (dB)

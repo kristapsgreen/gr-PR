@@ -62,6 +62,9 @@ from datetime import datetime
 import numpy as np
 import gnuradio.gr as gr
 
+# Speed of light (m/s) — used for bistatic range/velocity axis conversion.
+_C = 299_792_458.0
+
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtCore import pyqtSignal, QObject
 
@@ -85,13 +88,16 @@ class _RDCanvas(FigureCanvas):
 
     def __init__(self, num_doppler_bins, num_delay_bins,
                  sample_rate, max_doppler, dynamic_range_db,
-                 colormap, parent=None):
+                 colormap, baseline_m=0.0, carrier_freq_hz=510e6,
+                 parent=None):
 
         self._nd        = num_doppler_bins
         self._nl        = num_delay_bins
         self._fs        = sample_rate
         self._max_dop   = max_doppler
         self._dyn_db    = dynamic_range_db
+        self._baseline  = float(baseline_m)
+        self._fc        = float(carrier_freq_hz)
 
         # ── Figure setup ─────────────────────────────────────────────────
         fig = Figure(figsize=(8, 5), facecolor='#0a0a0a')
@@ -99,11 +105,15 @@ class _RDCanvas(FigureCanvas):
         self.setParent(parent)
         fig.subplots_adjust(left=0.11, right=0.93, top=0.91, bottom=0.13)
 
-        # ── Axis extents ──────────────────────────────────────────────────
-        # X: delay in µs  (0 → max_delay_µs)
-        # Y: Doppler in Hz (−max_doppler → +max_doppler)
-        delay_max_us  = (num_delay_bins / sample_rate) * 1e6
-        self._extent = [0, delay_max_us, -max_doppler, max_doppler]
+        # ── Axis extents (bistatic geometry) ─────────────────────────────
+        # X axis — Bistatic Range (m)
+        #   τ = l / fs  (seconds, delay of echo vs direct path)
+        #   R_b = L + c·τ   (total bistatic path: Tx→target→Rx)
+        # Y axis — Bistatic Velocity (m/s)
+        #   f_d measured in Hz; bistatic range-rate: |v_b| = f_d · c / f_c
+        range_max_m = self._baseline + _C * num_delay_bins / sample_rate
+        v_max_ms    = max_doppler * _C / self._fc
+        self._extent = [self._baseline, range_max_m, -v_max_ms, v_max_ms]
 
         # ── Initial blank image ───────────────────────────────────────────
         dummy = np.zeros((num_doppler_bins, num_delay_bins), dtype=np.float32)
@@ -134,15 +144,15 @@ class _RDCanvas(FigureCanvas):
 
         # ── Axes styling ──────────────────────────────────────────────────
         ax.set_facecolor('#0a0a0a')
-        ax.set_xlabel('Delay  (µs)', color='#cccccc', fontsize=10)
-        ax.set_ylabel('Doppler  (Hz)', color='#cccccc', fontsize=10)
+        ax.set_xlabel('Bistatic Range  (m)', color='#cccccc', fontsize=10)
+        ax.set_ylabel('Bistatic Velocity  (m/s)', color='#cccccc', fontsize=10)
         ax.set_title('Range–Doppler Map', color='#ffffff',
                      fontsize=12, fontweight='bold')
         ax.tick_params(colors='#888888', labelsize=8)
         for spine in ax.spines.values():
             spine.set_edgecolor('#333333')
 
-        # Zero-Doppler reference line
+        # Zero-velocity reference line
         ax.axhline(0.0, color='#00e5ff', linewidth=0.7,
                    linestyle='--', alpha=0.6)
 
@@ -213,10 +223,25 @@ class _RDCanvas(FigureCanvas):
         self.draw_idle()
 
     def set_max_doppler(self, val):
-        """Update the Doppler axis extent at runtime."""
+        """Update the velocity axis extent at runtime. Input is max Doppler (Hz)."""
         self._max_dop = float(val)
-        self._extent[2] = -self._max_dop
-        self._extent[3] =  self._max_dop
+        self._rescale_axes()
+
+    def set_baseline(self, val):
+        """Update the baseline L (metres) — shifts the range axis origin."""
+        self._baseline = float(val)
+        self._rescale_axes()
+
+    def set_carrier_freq(self, val):
+        """Update the carrier frequency f_c (Hz) — rescales velocity axis."""
+        self._fc = float(val)
+        self._rescale_axes()
+
+    def _rescale_axes(self):
+        """Recompute X (range) and Y (velocity) extents from current params."""
+        range_max_m = self._baseline + _C * self._nl / self._fs
+        v_max_ms    = self._max_dop * _C / self._fc
+        self._extent = [self._baseline, range_max_m, -v_max_ms, v_max_ms]
         self._im.set_extent(self._extent)
         self._ax.set_xlim(self._extent[0], self._extent[1])
         self._ax.set_ylim(self._extent[2], self._extent[3])
@@ -298,7 +323,8 @@ class _RDWidget(QtWidgets.QWidget):
 
     def __init__(self, num_doppler_bins, num_delay_bins,
                  sample_rate, max_doppler, dynamic_range_db,
-                 colormap, parent=None):
+                 colormap, baseline_m=0.0, carrier_freq_hz=510e6,
+                 parent=None):
         super().__init__(parent)
         self.setStyleSheet("""
             QWidget  { background: #111; color: #eee; }
@@ -321,6 +347,8 @@ class _RDWidget(QtWidgets.QWidget):
         self.canvas = _RDCanvas(num_doppler_bins, num_delay_bins,
                                 sample_rate, max_doppler,
                                 dynamic_range_db, colormap,
+                                baseline_m=baseline_m,
+                                carrier_freq_hz=carrier_freq_hz,
                                 parent=self)
         layout.addWidget(self.canvas, stretch=1)
 
@@ -372,6 +400,12 @@ class _RDWidget(QtWidgets.QWidget):
 
     def set_max_doppler(self, val):
         self.canvas.set_max_doppler(val)
+
+    def set_baseline(self, val):
+        self.canvas.set_baseline(val)
+
+    def set_carrier_freq(self, val):
+        self.canvas.set_carrier_freq(val)
 
     # ── Record button handler ────────────────────────────────────────────
     def _on_record_toggled(self, checked):
@@ -435,7 +469,9 @@ class rd_plot(gr.sync_block):
                  sample_rate=2.4e6,
                  max_doppler=1000.0,
                  dynamic_range_db=60.0,
-                 colormap='inferno'):
+                 colormap='inferno',
+                 baseline_m=0.0,
+                 carrier_freq_hz=510e6):
 
         gr.sync_block.__init__(
             self,
@@ -458,7 +494,8 @@ class rd_plot(gr.sync_block):
         # When gui_hint is empty, it stays as a standalone top-level window.
         self._win = _RDWidget(
             num_doppler_bins, num_delay_bins,
-            sample_rate, max_doppler, dynamic_range_db, colormap
+            sample_rate, max_doppler, dynamic_range_db, colormap,
+            baseline_m=baseline_m, carrier_freq_hz=carrier_freq_hz,
         )
 
         # QueuedConnection: signal crosses thread boundary via event queue.
@@ -525,3 +562,9 @@ class rd_plot(gr.sync_block):
 
     def set_max_doppler(self, val):
         self._win.set_max_doppler(val)
+
+    def set_baseline(self, val):
+        self._win.set_baseline(val)
+
+    def set_carrier_freq(self, val):
+        self._win.set_carrier_freq(val)

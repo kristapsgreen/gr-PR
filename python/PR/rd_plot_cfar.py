@@ -38,6 +38,9 @@ from datetime import datetime
 import numpy as np
 import gnuradio.gr as gr
 
+# Speed of light (m/s) — used for bistatic range/velocity axis conversion.
+_C = 299_792_458.0
+
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtCore import pyqtSignal, QObject
 
@@ -125,15 +128,19 @@ class _RDCfarCanvas(FigureCanvas):
 
     def __init__(self, num_doppler_bins, num_delay_bins,
                  sample_rate, max_doppler, dynamic_range_db,
-                 colormap, cfar_params, parent=None):
+                 colormap, cfar_params,
+                 baseline_m=0.0, carrier_freq_hz=510e6,
+                 parent=None):
 
-        self._nd      = num_doppler_bins
-        self._nl      = num_delay_bins
-        self._fs      = sample_rate
-        self._max_dop = max_doppler
-        self._dyn_db  = dynamic_range_db
+        self._nd       = num_doppler_bins
+        self._nl       = num_delay_bins
+        self._fs       = sample_rate
+        self._max_dop  = max_doppler
+        self._dyn_db   = dynamic_range_db
+        self._baseline = float(baseline_m)
+        self._fc       = float(carrier_freq_hz)
         # cfar_params = dict(train_r, train_d, guard_r, guard_d, pfa)
-        self._cfar    = dict(cfar_params)
+        self._cfar     = dict(cfar_params)
 
         # ── Figure: two side-by-side subplots ─────────────────────────────
         fig = Figure(figsize=(14, 5), facecolor='#0a0a0a')
@@ -142,8 +149,10 @@ class _RDCfarCanvas(FigureCanvas):
         fig.subplots_adjust(left=0.06, right=0.97,
                             top=0.91, bottom=0.13, wspace=0.22)
 
-        delay_max_us = (num_delay_bins / sample_rate) * 1e6
-        self._extent = [0, delay_max_us, -max_doppler, max_doppler]
+        # Bistatic axes: X = Bistatic Range (m), Y = Bistatic Velocity (m/s)
+        range_max_m  = self._baseline + _C * num_delay_bins / sample_rate
+        v_max_ms     = max_doppler * _C / self._fc
+        self._extent = [self._baseline, range_max_m, -v_max_ms, v_max_ms]
         dummy = np.zeros((num_doppler_bins, num_delay_bins), dtype=np.float32)
 
         # ── Left: dB RD map ───────────────────────────────────────────────
@@ -176,8 +185,8 @@ class _RDCfarCanvas(FigureCanvas):
         for ax, title in ((ax_l, 'Range–Doppler Map'),
                           (ax_r, 'CA-CFAR Detections')):
             ax.set_facecolor('#0a0a0a')
-            ax.set_xlabel('Delay  (µs)', color='#cccccc', fontsize=10)
-            ax.set_ylabel('Doppler  (Hz)', color='#cccccc', fontsize=10)
+            ax.set_xlabel('Bistatic Range  (m)', color='#cccccc', fontsize=10)
+            ax.set_ylabel('Bistatic Velocity  (m/s)', color='#cccccc', fontsize=10)
             ax.set_title(title, color='#ffffff', fontsize=11, fontweight='bold')
             ax.tick_params(colors='#888888', labelsize=8)
             for spine in ax.spines.values():
@@ -260,8 +269,21 @@ class _RDCfarCanvas(FigureCanvas):
 
     def set_max_doppler(self, val):
         self._max_dop = float(val)
-        self._extent[2] = -self._max_dop
-        self._extent[3] =  self._max_dop
+        self._rescale_axes()
+
+    def set_baseline(self, val):
+        self._baseline = float(val)
+        self._rescale_axes()
+
+    def set_carrier_freq(self, val):
+        self._fc = float(val)
+        self._rescale_axes()
+
+    def _rescale_axes(self):
+        """Recompute both subplots' X (range) and Y (velocity) extents."""
+        range_max_m  = self._baseline + _C * self._nl / self._fs
+        v_max_ms     = self._max_dop * _C / self._fc
+        self._extent = [self._baseline, range_max_m, -v_max_ms, v_max_ms]
         for im, ax in ((self._im_l, self._ax_l), (self._im_r, self._ax_r)):
             im.set_extent(self._extent)
             ax.set_xlim(self._extent[0], self._extent[1])
@@ -342,7 +364,9 @@ class _RDCfarWidget(QtWidgets.QWidget):
 
     def __init__(self, num_doppler_bins, num_delay_bins,
                  sample_rate, max_doppler, dynamic_range_db,
-                 colormap, cfar_params, parent=None):
+                 colormap, cfar_params,
+                 baseline_m=0.0, carrier_freq_hz=510e6,
+                 parent=None):
         super().__init__(parent)
         self.setStyleSheet("""
             QWidget  { background: #111; color: #eee; }
@@ -366,6 +390,8 @@ class _RDCfarWidget(QtWidgets.QWidget):
             num_doppler_bins, num_delay_bins,
             sample_rate, max_doppler,
             dynamic_range_db, colormap, cfar_params,
+            baseline_m=baseline_m,
+            carrier_freq_hz=carrier_freq_hz,
             parent=self,
         )
         layout.addWidget(self.canvas, stretch=1)
@@ -421,6 +447,8 @@ class _RDCfarWidget(QtWidgets.QWidget):
     def set_dynamic_range(self, val): self._dr_slider.setValue(int(val))
     def set_colormap(self, name):     self._cmap.setCurrentText(name)
     def set_max_doppler(self, val):   self.canvas.set_max_doppler(val)
+    def set_baseline(self, val):      self.canvas.set_baseline(val)
+    def set_carrier_freq(self, val):  self.canvas.set_carrier_freq(val)
     def set_pfa(self, val):           self._pfa.setValue(float(val))
     def set_train_cells(self, r, d):  self.canvas.set_train_cells(r, d)
     def set_guard_cells(self, r, d):  self.canvas.set_guard_cells(r, d)
@@ -490,6 +518,8 @@ class rd_plot_cfar(gr.sync_block):
                  max_doppler=1000.0,
                  dynamic_range_db=60.0,
                  colormap='inferno',
+                 baseline_m=0.0,
+                 carrier_freq_hz=510e6,
                  cfar_train_range=8,
                  cfar_train_doppler=4,
                  cfar_guard_range=2,
@@ -522,6 +552,7 @@ class rd_plot_cfar(gr.sync_block):
             num_doppler_bins, num_delay_bins,
             sample_rate, max_doppler, dynamic_range_db,
             colormap, cfar_params,
+            baseline_m=baseline_m, carrier_freq_hz=carrier_freq_hz,
         )
 
         self._bridge.new_frame.connect(
@@ -563,6 +594,8 @@ class rd_plot_cfar(gr.sync_block):
     def set_dynamic_range(self, val): self._win.set_dynamic_range(val)
     def set_colormap(self, name):     self._win.set_colormap(name)
     def set_max_doppler(self, val):   self._win.set_max_doppler(val)
+    def set_baseline(self, val):      self._win.set_baseline(val)
+    def set_carrier_freq(self, val):  self._win.set_carrier_freq(val)
     def set_pfa(self, val):           self._win.set_pfa(val)
     def set_train_cells(self, r, d):  self._win.set_train_cells(r, d)
     def set_guard_cells(self, r, d):  self._win.set_guard_cells(r, d)

@@ -1,0 +1,107 @@
+id: PR_cu_ECA
+label: CuPy ECA
+category: '[PR]'
+
+templates:
+  imports: from gnuradio.PR import cu_ECA
+  make: |
+    cu_ECA(
+        cpi_samp=${cpi_samp},
+        num_taps=${num_taps},
+        reg_mu=${reg_mu},
+        release_mem_each_cpi=${release_mem_each_cpi},
+        mem_pool_limit_mb=${mem_pool_limit_mb},
+    )
+  callbacks:
+    - set_num_taps(${num_taps})
+    - set_reg_mu(${reg_mu})
+    - set_release_mem_each_cpi(${release_mem_each_cpi})
+
+parameters:
+  - id: cpi_samp
+    label: CPI Samples
+    dtype: int
+    default: '24000'
+
+  - id: num_taps
+    label: Lattice Order (M)
+    dtype: int
+    default: '128'
+
+  - id: reg_mu
+    label: Regularisation μ
+    dtype: float
+    default: '0.01'
+
+  - id: release_mem_each_cpi
+    label: Release GPU pool each CPI
+    dtype: bool
+    default: 'True'
+    options: ['True', 'False']
+    option_labels: ['Yes', 'No']
+
+  - id: mem_pool_limit_mb
+    label: GPU pool cap (MB, 0=unlimited)
+    dtype: int
+    default: '0'
+
+inputs:
+  - label: ref
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv
+    dtype: complex
+    vlen: ${cpi_samp}
+
+outputs:
+  - label: ref
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv_clean
+    dtype: complex
+    vlen: ${cpi_samp}
+
+documentation: |-
+    Direct-path Disturbance Cancellation (ECA) — gr-PR  [CuPy GPU]
+
+    GPU-accelerated version of the ECA block using CuPy.
+    Same Block Lattice Filter algorithm as the CPU ECA block; drop-in
+    replacement (identical port signature).
+
+    GPU MEMORY NOTES
+      ECA has no FFTs, so it doesn't grow the cuFFT plan cache. Steady-state
+      footprint is ~5 · cpi_samp · 8 bytes (≈1 MB for cpi_samp=24000).
+
+      If running alongside cu_caf on a GPU that is already heavily loaded
+      (you mentioned ~40% VRAM with cu_caf alone), these two extra controls
+      help keep the shared CuPy pool in check:
+
+        Release GPU pool each CPI
+          After every work() call, ask CuPy to release unused blocks
+          back to CUDA. Small per-CPI cost, prevents slow VRAM creep.
+          Default: Yes.
+
+        GPU pool cap (MB)
+          Hard cap on CuPy's default memory pool, process-wide (shared
+          with cu_caf). 0 = unlimited. Set to e.g. 2048 to bound total
+          GPU usage to 2 GB. Set on whichever GPU block instantiates
+          first; applies to the whole process.
+
+    INPUTS
+      ref  (port 0) : complex vector, len = cpi_samp   — reference channel
+      surv (port 1) : complex vector, len = cpi_samp   — surveillance channel
+
+    OUTPUTS
+      ref        : pass-through of input reference
+      surv_clean : surveillance with direct path + short-delay clutter removed
+
+    PARAMETERS
+      cpi_samp  — must match stream_to_vector length
+      num_taps  — lattice order M (delay bins to cancel, typ. 100-300)
+      reg_mu    — loading for numerical stability (typ. 1e-3 … 1.0)
+
+    REQUIRES: NVIDIA GPU with CuPy installed (pip install cupy-cuda12x)
+
+file_format: 1
