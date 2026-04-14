@@ -22,6 +22,6 @@ except ModuleNotFoundError:
 # import any pure python here
 from .caf import caf
 from .rd_plot import rd_plot
-from .DDC import DDC
+from .ECA import ECA
 from .cu_caf import cu_caf
 #

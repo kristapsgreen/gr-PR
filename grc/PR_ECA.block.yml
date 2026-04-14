@@ -1,11 +1,11 @@
-id: PR_DDC
-label: DDC
+id: PR_ECA
+label: ECA
 category: '[PR]'
 
 templates:
-  imports: from gnuradio.PR import DDC
+  imports: from gnuradio.PR import ECA
   make: |
-    DDC(
+    ECA(
         cpi_samp=${cpi_samp},
         num_taps=${num_taps},
         reg_mu=${reg_mu},
@@ -49,13 +49,13 @@ outputs:
     vlen: ${cpi_samp}
 
 documentation: |-
-    Direct-path Disturbance Cancellation (DDC) — gr-PR
+    Extensive Cancellation Algorithm (ECA) — gr-PR
 
     Removes direct-path signal and short-delay multipath clutter from the
-    surveillance channel using the ECA batch Wiener filter.
+    surveillance channel using an order-recursive block lattice Wiener filter.
 
     Place BETWEEN stream_to_vector and CAF:
-        stream_to_vector → DDC → CAF
+        stream_to_vector → ECA → CAF
 
     Reference passes through unchanged; only surveillance is cleaned.
 
@@ -69,11 +69,10 @@ documentation: |-
 
     PARAMETERS
       cpi_samp   — must match stream_to_vector length
-      num_taps   — number of FIR taps / delay bins to cancel.
+      num_taps   — lattice order M (delay bins to cancel).
                    Larger = deeper clutter removal but more CPU.
                    Start with 100–300 for DVB-T at 2.4 MHz.
-      reg_mu     — Tikhonov regularisation (diagonal loading).
-                   Stabilises the matrix inversion.
+      reg_mu     — denominator loading for numerical safety.
                    Typical: 0.001 to 1.0. Increase if artefacts appear.
 
 file_format: 1

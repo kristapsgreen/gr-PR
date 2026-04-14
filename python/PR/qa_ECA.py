@@ -8,10 +8,10 @@
 
 import numpy as np
 from gnuradio import gr, gr_unittest, blocks
-from gnuradio.PR import DDC
+from gnuradio.PR import ECA
 
 
-class qa_DDC(gr_unittest.TestCase):
+class qa_ECA(gr_unittest.TestCase):
 
     def setUp(self):
         self.tb = gr.top_block()
@@ -21,14 +21,14 @@ class qa_DDC(gr_unittest.TestCase):
 
     def test_instance(self):
         """Block instantiates with default parameters."""
-        instance = DDC()
+        instance = ECA()
         self.assertEqual(instance.get_cpi_samp(), 24000)
         self.assertEqual(instance.get_num_taps(), 128)
 
     def test_direct_path_cancellation(self):
         """
         Synthetic test: surveillance = scaled + delayed copy of reference + weak target.
-        After DDC the direct-path energy should be heavily suppressed while
+        After ECA the direct-path energy should be heavily suppressed while
         the target component partially survives.
         """
         N = 2048
@@ -52,14 +52,14 @@ class qa_DDC(gr_unittest.TestCase):
         # ── Run the block ──────────────────────────────────────────────
         src_ref  = blocks.vector_source_c(ref.tolist(),  vlen=N)
         src_surv = blocks.vector_source_c(surv.tolist(), vlen=N)
-        ddc      = DDC(cpi_samp=N, num_taps=K, reg_mu=0.01)
+        eca      = ECA(cpi_samp=N, num_taps=K, reg_mu=0.01)
         snk_ref  = blocks.vector_sink_c(vlen=N)
         snk_surv = blocks.vector_sink_c(vlen=N)
 
-        self.tb.connect(src_ref,  (ddc, 0))
-        self.tb.connect(src_surv, (ddc, 1))
-        self.tb.connect((ddc, 0), snk_ref)
-        self.tb.connect((ddc, 1), snk_surv)
+        self.tb.connect(src_ref,  (eca, 0))
+        self.tb.connect(src_surv, (eca, 1))
+        self.tb.connect((eca, 0), snk_ref)
+        self.tb.connect((eca, 1), snk_surv)
         self.tb.run()
 
         # ── Check results ──────────────────────────────────────────────
@@ -80,4 +80,4 @@ class qa_DDC(gr_unittest.TestCase):
 
 
 if __name__ == '__main__':
-    gr_unittest.run(qa_DDC)
+    gr_unittest.run(qa_ECA)
