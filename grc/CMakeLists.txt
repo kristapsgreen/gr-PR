@@ -12,5 +12,9 @@ install(FILES
     PR_rd_plot_cfar.block.yml
     PR_ECA.block.yml
     PR_cu_caf.block.yml
-    PR_cu_ECA.block.yml DESTINATION share/gnuradio/grc/blocks
+    PR_cu_caf_4x.block.yml
+    PR_cu_ECA.block.yml
+    PR_cu_ECA_4x.block.yml
+    PR_krakensdr_source.block.yml
+    PR_rd_plot_cfar_doa.block.yml DESTINATION share/gnuradio/grc/blocks
 )

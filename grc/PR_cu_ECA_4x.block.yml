@@ -1,0 +1,141 @@
+id: PR_cu_ECA_4x
+label: CuPy ECA 4x
+category: '[PR]'
+
+templates:
+  imports: from gnuradio.PR import cu_ECA_4x
+  make: |
+    cu_ECA_4x(
+        cpi_samp=${cpi_samp},
+        num_taps=${num_taps},
+        reg_mu=${reg_mu},
+        release_mem_each_cpi=${release_mem_each_cpi},
+        mem_pool_limit_mb=${mem_pool_limit_mb},
+    )
+  callbacks:
+    - set_num_taps(${num_taps})
+    - set_reg_mu(${reg_mu})
+    - set_release_mem_each_cpi(${release_mem_each_cpi})
+
+parameters:
+  - id: cpi_samp
+    label: CPI Samples
+    dtype: int
+    default: '24000'
+
+  - id: num_taps
+    label: Lattice Order (M)
+    dtype: int
+    default: '128'
+
+  - id: reg_mu
+    label: Regularisation μ
+    dtype: float
+    default: '0.01'
+
+  - id: release_mem_each_cpi
+    label: Release GPU pool each CPI
+    dtype: bool
+    default: 'True'
+    options: ['True', 'False']
+    option_labels: ['Yes', 'No']
+
+  - id: mem_pool_limit_mb
+    label: GPU pool cap (MB, 0=unlimited)
+    dtype: int
+    default: '0'
+
+inputs:
+  - label: ref
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv1
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv2
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv3
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv4
+    dtype: complex
+    vlen: ${cpi_samp}
+
+outputs:
+  - label: ref
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv_clean1
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv_clean2
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv_clean3
+    dtype: complex
+    vlen: ${cpi_samp}
+
+  - label: surv_clean4
+    dtype: complex
+    vlen: ${cpi_samp}
+
+documentation: |-
+    Direct-path Disturbance Cancellation (ECA) 4-channel — gr-PR  [CuPy GPU]
+
+    GPU-accelerated 4-channel ECA block. Accepts one reference and four
+    surveillance vectors per CPI; emits the reference (pass-through) and four
+    cleaned surveillance vectors. Connect ref_out directly to cu_caf_4x ref_in
+    to keep all five CPIs aligned without any explicit FIFO buffering.
+
+    COMPUTE SAVING vs FOUR SEPARATE cu_ECA BLOCKS
+      The lattice prediction state (b, f, kappa) depends only on the reference
+      signal. This block computes it ONCE per stage and reuses the result across
+      all four surveillance channels via a (4 × N) matrix update, saving
+      approximately 3 × M × O(N) operations per CPI (where M = lattice order).
+
+    GPU MEMORY NOTES
+      Steady-state VRAM footprint: ~9 × cpi_samp × 8 bytes (≈1.7 MB at
+      cpi_samp=24000). No FFTs → no cuFFT plan cache growth.
+
+      If running alongside cu_caf_4x on a GPU that is already heavily loaded,
+      these two controls help keep the shared CuPy pool in check:
+
+        Release GPU pool each CPI
+          After every work() call, ask CuPy to release unused blocks back to
+          CUDA. Small per-CPI cost, prevents slow VRAM creep. Default: Yes.
+
+        GPU pool cap (MB)
+          Hard cap on CuPy's default memory pool, process-wide (shared with
+          cu_caf_4x). 0 = unlimited. Set on whichever GPU block instantiates
+          first; applies to the whole process.
+
+    INPUTS
+      ref   (port 0) : complex vector, len = cpi_samp — reference channel
+      surv1 (port 1) : complex vector, len = cpi_samp — surveillance channel 1
+      surv2 (port 2) : complex vector, len = cpi_samp — surveillance channel 2
+      surv3 (port 3) : complex vector, len = cpi_samp — surveillance channel 3
+      surv4 (port 4) : complex vector, len = cpi_samp — surveillance channel 4
+
+    OUTPUTS
+      ref         (port 0) : pass-through reference (same CPI, no GPU roundtrip)
+      surv_clean1 (port 1) : surveillance 1 with direct path / clutter removed
+      surv_clean2 (port 2) : surveillance 2 with direct path / clutter removed
+      surv_clean3 (port 3) : surveillance 3 with direct path / clutter removed
+      surv_clean4 (port 4) : surveillance 4 with direct path / clutter removed
+
+    PARAMETERS
+      cpi_samp  — must match stream_to_vector length
+      num_taps  — lattice order M (delay bins to cancel, typ. 100-300)
+      reg_mu    — loading for numerical stability (typ. 1e-3 … 1.0)
+
+    REQUIRES: NVIDIA GPU with CuPy installed (pip install cupy-cuda12x)
+
+file_format: 1

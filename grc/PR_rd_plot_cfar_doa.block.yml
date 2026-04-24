@@ -1,0 +1,269 @@
+id: PR_rd_plot_cfar_doa
+label: RD Plot + CFAR + DOA
+category: '[PR]'
+flags: [ show_id ]
+
+templates:
+  imports: from gnuradio.PR import rd_plot_cfar_doa
+  make: |
+    rd_plot_cfar_doa(
+        num_doppler_bins=${num_doppler_bins},
+        num_delay_bins=${num_delay_bins},
+        sample_rate=${sample_rate},
+        max_doppler=${max_doppler},
+        dynamic_range_db=${dynamic_range_db},
+        colormap=${colormap},
+        baseline_m=${baseline_m},
+        carrier_freq_hz=${carrier_freq_hz},
+        cfar_train_range=${cfar_train_range},
+        cfar_train_doppler=${cfar_train_doppler},
+        cfar_guard_range=${cfar_guard_range},
+        cfar_guard_doppler=${cfar_guard_doppler},
+        cfar_pfa=${cfar_pfa},
+        max_targets=${max_targets},
+        antenna_spacing_m=${antenna_spacing_m},
+        mvdr_loading=${mvdr_loading},
+        mvdr_angle_step=${mvdr_angle_step},
+        mvdr_nb_r=${mvdr_nb_r},
+        mvdr_nb_d=${mvdr_nb_d},
+        use_mvdr=${use_mvdr},
+        radar_lat=${radar_lat},
+        radar_lon=${radar_lon},
+        tx_lat=${tx_lat},
+        tx_lon=${tx_lon},
+        boresight_az_deg=${boresight_az_deg},
+        xy_extent_m=${xy_extent_m},
+    )
+  callbacks:
+    - set_dynamic_range(${dynamic_range_db})
+    - set_colormap(${colormap})
+    - set_max_doppler(${max_doppler})
+    - set_baseline(${baseline_m})
+    - set_carrier_freq(${carrier_freq_hz})
+    - set_pfa(${cfar_pfa})
+    - set_train_cells(${cfar_train_range}, ${cfar_train_doppler})
+    - set_guard_cells(${cfar_guard_range}, ${cfar_guard_doppler})
+    - set_antenna_spacing(${antenna_spacing_m})
+    - set_mvdr_loading(${mvdr_loading})
+    - set_max_targets(${max_targets})
+    - set_mvdr_angle_step(${mvdr_angle_step})
+
+parameters:
+  # ── Core RD parameters ────────────────────────────────────────────────
+  - id: num_doppler_bins
+    label: Doppler Bins
+    dtype: int
+    default: '128'
+
+  - id: num_delay_bins
+    label: Delay Bins
+    dtype: int
+    default: '128'
+
+  - id: sample_rate
+    label: Sample Rate (Hz)
+    dtype: float
+    default: 'samp_rate'
+
+  - id: max_doppler
+    label: Max Doppler (Hz)
+    dtype: float
+    default: '1000.0'
+
+  - id: baseline_m
+    label: Baseline L (m)
+    dtype: float
+    default: '0.0'
+
+  - id: carrier_freq_hz
+    label: Carrier Freq (Hz)
+    dtype: float
+    default: '510e6'
+
+  - id: dynamic_range_db
+    label: Dynamic Range (dB)
+    dtype: float
+    default: '60'
+
+  - id: colormap
+    label: Colormap
+    dtype: enum
+    default: '"inferno"'
+    options: ['"inferno"', '"plasma"', '"viridis"', '"magma"', '"hot"', '"jet"', '"turbo"']
+    option_labels: [Inferno, Plasma, Viridis, Magma, Hot, Jet, Turbo]
+
+  # ── CFAR ─────────────────────────────────────────────────────────────
+  - id: cfar_train_range
+    label: CFAR Train cells (range)
+    dtype: int
+    default: '8'
+    category: CFAR
+
+  - id: cfar_train_doppler
+    label: CFAR Train cells (doppler)
+    dtype: int
+    default: '4'
+    category: CFAR
+
+  - id: cfar_guard_range
+    label: CFAR Guard cells (range)
+    dtype: int
+    default: '2'
+    category: CFAR
+
+  - id: cfar_guard_doppler
+    label: CFAR Guard cells (doppler)
+    dtype: int
+    default: '1'
+    category: CFAR
+
+  - id: cfar_pfa
+    label: CFAR Pfa
+    dtype: float
+    default: '1e-4'
+    category: CFAR
+
+  # ── Targeting ─────────────────────────────────────────────────────────
+  - id: max_targets
+    label: Max Targets
+    dtype: int
+    default: '32'
+    category: DOA
+
+  # ── MVDR / DOA ────────────────────────────────────────────────────────
+  - id: antenna_spacing_m
+    label: Antenna Spacing (m)
+    dtype: float
+    default: '0.3'
+    category: DOA
+
+  - id: mvdr_loading
+    label: MVDR Diagonal Loading
+    dtype: float
+    default: '0.01'
+    category: DOA
+
+  - id: mvdr_angle_step
+    label: DOA Angle Step (deg)
+    dtype: float
+    default: '1.0'
+    category: DOA
+
+  - id: mvdr_nb_r
+    label: MVDR Neighbourhood (range)
+    dtype: int
+    default: '2'
+    category: DOA
+
+  - id: mvdr_nb_d
+    label: MVDR Neighbourhood (doppler)
+    dtype: int
+    default: '2'
+    category: DOA
+
+  - id: use_mvdr
+    label: Use MVDR (vs DAS)
+    dtype: bool
+    default: 'True'
+    category: DOA
+
+  # ── Geolocation ───────────────────────────────────────────────────────
+  - id: radar_lat
+    label: Radar Latitude (deg)
+    dtype: float
+    default: '0.0'
+    category: Geo
+
+  - id: radar_lon
+    label: Radar Longitude (deg)
+    dtype: float
+    default: '0.0'
+    category: Geo
+
+  - id: tx_lat
+    label: Tx Latitude (deg)
+    dtype: float
+    default: '0.0'
+    category: Geo
+
+  - id: tx_lon
+    label: Tx Longitude (deg)
+    dtype: float
+    default: '0.01'
+    category: Geo
+
+  - id: boresight_az_deg
+    label: Boresight Azimuth (deg from N)
+    dtype: float
+    default: '0.0'
+    category: Geo
+
+  - id: xy_extent_m
+    label: XY Map Half-Extent (m)
+    dtype: float
+    default: '15000.0'
+    category: Geo
+
+  - id: gui_hint
+    label: GUI Hint
+    dtype: gui_hint
+    hide: part
+
+inputs:
+  - label: caf1
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+  - label: caf2
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+  - label: caf3
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+  - label: caf4
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+outputs: []
+
+documentation: |-
+    Range-Doppler + CA-CFAR + MVDR DOA + XY Geolocation Sink — gr-PR
+
+    Extends rd_plot_cfar with MVDR direction-of-arrival estimation on each
+    CFAR detection and a bistatic-ellipse XY geolocation map. Sink block —
+    no outputs. All plotting runs in the Qt GUI thread (QueuedConnection),
+    so upstream CAF/ECA blocks are unaffected in throughput.
+
+    INPUTS
+      caf1..caf4 — complex64 vectors, len = num_doppler_bins × num_delay_bins.
+      Connect directly from cu_caf_4x outputs (caf_out1..caf_out4).
+      The GR scheduler calls work() only when all 4 have data — cu_caf_4x
+      emits all 4 outputs atomically per CPI, so this is inherently aligned.
+
+    PLOTS
+      Left   : |CAF1|² dB Range–Doppler map (same as rd_plot_cfar)
+      Middle : CA-CFAR detection mask with cluster-peak crosshairs
+      Right  : XY geolocation map (bistatic-ellipse / DOA-ray intersection)
+
+    TARGET LIST
+      A monospace read-only text panel on the right lists per-target:
+        index, bistatic range (km), velocity (m/s), DOA (deg from boresight),
+        global bearing (deg from N), X and Y position (km).
+
+    ARRAY MODEL
+      4-element uniform linear array (ULA).
+      Steering: a(θ) = exp(j·2π·d/λ·sin(θ)·[0,1,2,3]).
+      MVDR covariance estimated from a (2*nb_r+1)×(2*nb_d+1) neighbourhood
+      of RD cells around each detection, averaged across all 4 CAFs.
+
+    GEOLOCATION
+      Radar at XY origin (+Y = North). Tx position from haversine (≤0.3 %
+      error for baselines < 50 km). Bistatic-ellipse / DOA-ray closed-form
+      solution; all geodesy pre-computed at init — hot path is pure algebra.
+
+    CFAR PARAMETERS
+      Same as rd_plot_cfar. See that block's documentation.
+
+file_format: 1

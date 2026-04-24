@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(find \"C:\\\\Users\\\\melna\\\\OneDrive\\\\Documents\\\\gr-PR\\\\include\" -type f -exec ls -lh {} \\\\;)",
+      "Bash(gh api *)",
+      "Bash(curl -s \"https://api.github.com/repos/krakenrf/gr-krakensdr/contents/python/krakensdr/krakensdr_source.py\")",
+      "Bash(python3 -c \"import sys,json,base64; d=json.load\\(sys.stdin\\); print\\(base64.b64decode\\(d['content']\\).decode\\(\\)\\)\")",
+      "Bash(python3 -c \"import sys,json,base64; d=json.load\\(sys.stdin\\); open\\('C:/Users/melna/AppData/Local/Temp/krakensdr_source.py','wb'\\).write\\(base64.b64decode\\(d['content']\\)\\)\")",
+      "Bash(curl -s \"https://api.github.com/repos/krakenrf/gr-krakensdr/contents/grc/krakensdr_krakensdr_source.block.yml\")",
+      "Bash(python3 -c \"import sys,json,base64; d=json.load\\(sys.stdin\\); open\\('C:/Users/melna/AppData/Local/Temp/krakensdr_source.block.yml','wb'\\).write\\(base64.b64decode\\(d['content']\\)\\)\")"
+    ]
+  }
+}
