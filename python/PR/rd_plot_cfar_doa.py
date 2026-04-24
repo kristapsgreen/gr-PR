@@ -334,12 +334,17 @@ class _RDCfarDoaCanvas(FigureCanvas):
         self._tx_x = self._L * math.sin(b_rad)   # East  (m)
         self._tx_y = self._L * math.cos(b_rad)   # North (m)
 
-        # ── Figure: three side-by-side subplots ───────────────────────────
-        fig = Figure(figsize=(20, 5), facecolor='#0a0a0a')
+        # ── Figure: 2-row layout ──────────────────────────────────────────
+        # Row 0: RD map (left) | CFAR detections (right)
+        # Row 1: XY geolocation map (full width)
+        from matplotlib.gridspec import GridSpec
+        fig = Figure(figsize=(14, 10), facecolor='#0a0a0a')
         super().__init__(fig)
         self.setParent(parent)
-        fig.subplots_adjust(left=0.05, right=0.97,
-                            top=0.91, bottom=0.13, wspace=0.28)
+        gs = GridSpec(2, 2, figure=fig,
+                      left=0.06, right=0.97,
+                      top=0.95, bottom=0.07,
+                      hspace=0.35, wspace=0.25)
 
         # Bistatic axes extents for the two RD plots
         range_max_m = self._baseline + _C * num_delay_bins / sample_rate
@@ -348,8 +353,8 @@ class _RDCfarDoaCanvas(FigureCanvas):
 
         dummy = np.zeros((num_doppler_bins, num_delay_bins), dtype=np.float32)
 
-        # ── Left: dB RD map (caf1 only) ───────────────────────────────────
-        ax_l = fig.add_subplot(131)
+        # ── Row 0 left: dB RD map (caf1 only) ────────────────────────────
+        ax_l = fig.add_subplot(gs[0, 0])
         self._ax_l = ax_l
         self._im_l = ax_l.imshow(
             dummy, aspect='auto', origin='lower', extent=self._extent,
@@ -366,24 +371,25 @@ class _RDCfarDoaCanvas(FigureCanvas):
         cbar_l.ax.yaxis.set_tick_params(color='#666666')
         self._cbar_l = cbar_l
 
-        # ── Middle: CFAR detection mask ───────────────────────────────────
-        ax_m = fig.add_subplot(132)
+        # ── Row 0 right: CFAR detection mask ──────────────────────────────
+        # White pixels = every cell passing CA-CFAR threshold.
+        # Red X markers = cluster-peak cells sent to MVDR (one per target blob).
+        ax_m = fig.add_subplot(gs[0, 1])
         self._ax_m = ax_m
         self._im_m = ax_m.imshow(
             dummy, aspect='auto', origin='lower', extent=self._extent,
             cmap='Greys_r', vmin=0.0, vmax=1.0, interpolation='nearest',
         )
-        # Scatter overlay for cluster peaks on CFAR plot
         self._scat_m = ax_m.scatter([], [], s=40, c='#ff4444',
                                     marker='x', linewidths=1.5, zorder=5)
 
-        # ── Right: XY geolocation map ─────────────────────────────────────
-        ax_r = fig.add_subplot(133)
+        # ── Row 1: XY geolocation map (spans both columns) ───────────────
+        ax_r = fig.add_subplot(gs[1, :])
         self._ax_r = ax_r
         ax_r.set_facecolor('#0a0a0a')
         ax_r.set_xlim(-xy_extent_m, xy_extent_m)
         ax_r.set_ylim(-xy_extent_m, xy_extent_m)
-        ax_r.set_aspect('equal')
+        ax_r.set_aspect('equal', adjustable='datalim')
         ax_r.set_xlabel('East  (m)', color='#cccccc', fontsize=9)
         ax_r.set_ylabel('North (m)', color='#cccccc', fontsize=9)
         ax_r.set_title('XY Geolocation', color='#ffffff', fontsize=11,
@@ -849,7 +855,7 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
 
         outer.addLayout(ctrl)
 
-        self.resize(1580, 620)
+        self.resize(1400, 900)
 
     # ── Target list refresh (called from canvas each frame) ───────────────
     def _update_target_list(self, targets):
