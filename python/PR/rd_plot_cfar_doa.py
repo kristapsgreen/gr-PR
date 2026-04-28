@@ -779,15 +779,6 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
         self._pfa.valueChanged.connect(self.canvas.set_pfa)
         ctrl.addWidget(self._pfa)
 
-        ctrl.addWidget(QtWidgets.QLabel('  Loading:'))
-        self._loading_sb = QtWidgets.QDoubleSpinBox()
-        self._loading_sb.setDecimals(4)
-        self._loading_sb.setRange(0.0, 100.0)
-        self._loading_sb.setSingleStep(0.001)
-        self._loading_sb.setValue(mvdr_loading)
-        self._loading_sb.valueChanged.connect(self.canvas.set_mvdr_loading)
-        ctrl.addWidget(self._loading_sb)
-
         ctrl.addStretch()
 
         self._rec_btn = QtWidgets.QPushButton('● Record CSV')
@@ -904,11 +895,7 @@ class rd_plot_cfar_doa(gr.sync_block):
     cfar_pfa          : float — probability of false alarm
     max_targets       : int   — cap on simultaneous tracked targets
     antenna_spacing_m : float — ULA inter-element spacing (m)
-    mvdr_loading      : float — diagonal loading for MVDR covariance
-    mvdr_angle_step   : float — angular resolution of DOA grid (deg)
-    mvdr_nb_r         : int   — MVDR neighbourhood half-width (delay)
-    mvdr_nb_d         : int   — MVDR neighbourhood half-width (Doppler)
-    use_mvdr          : bool  — True=MVDR/Capon, False=conventional DAS
+    angle_step        : float — angular resolution of DOA grid (deg)
     radar_lat         : float — receiver latitude  (WGS84 deg)
     radar_lon         : float — receiver longitude (WGS84 deg)
     tx_lat            : float — transmitter latitude  (WGS84 deg)
