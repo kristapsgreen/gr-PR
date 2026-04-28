@@ -22,11 +22,7 @@ templates:
         cfar_pfa=${cfar_pfa},
         max_targets=${max_targets},
         antenna_spacing_m=${antenna_spacing_m},
-        mvdr_loading=${mvdr_loading},
-        mvdr_angle_step=${mvdr_angle_step},
-        mvdr_nb_r=${mvdr_nb_r},
-        mvdr_nb_d=${mvdr_nb_d},
-        use_mvdr=${use_mvdr},
+        angle_step=${angle_step},
         radar_lat=${radar_lat},
         radar_lon=${radar_lon},
         tx_lat=${tx_lat},
@@ -44,9 +40,8 @@ templates:
     - set_train_cells(${cfar_train_range}, ${cfar_train_doppler})
     - set_guard_cells(${cfar_guard_range}, ${cfar_guard_doppler})
     - set_antenna_spacing(${antenna_spacing_m})
-    - set_mvdr_loading(${mvdr_loading})
     - set_max_targets(${max_targets})
-    - set_mvdr_angle_step(${mvdr_angle_step})
+    - set_angle_step(${angle_step})
 
 parameters:
   # ── Core RD parameters ────────────────────────────────────────────────
@@ -130,41 +125,17 @@ parameters:
     default: '32'
     category: DOA
 
-  # ── MVDR / DOA ────────────────────────────────────────────────────────
+  # ── DOA (conventional beamforming) ───────────────────────────────────
   - id: antenna_spacing_m
     label: Antenna Spacing (m)
     dtype: float
     default: '0.3'
     category: DOA
 
-  - id: mvdr_loading
-    label: MVDR Diagonal Loading
-    dtype: float
-    default: '0.01'
-    category: DOA
-
-  - id: mvdr_angle_step
+  - id: angle_step
     label: DOA Angle Step (deg)
     dtype: float
     default: '1.0'
-    category: DOA
-
-  - id: mvdr_nb_r
-    label: MVDR Neighbourhood (range)
-    dtype: int
-    default: '2'
-    category: DOA
-
-  - id: mvdr_nb_d
-    label: MVDR Neighbourhood (doppler)
-    dtype: int
-    default: '2'
-    category: DOA
-
-  - id: use_mvdr
-    label: Use MVDR (vs DAS)
-    dtype: bool
-    default: 'True'
     category: DOA
 
   # ── Geolocation ───────────────────────────────────────────────────────

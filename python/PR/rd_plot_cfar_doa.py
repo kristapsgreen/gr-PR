@@ -165,58 +165,20 @@ def _build_steering_matrix(angles_deg, spacing_m, wavelength_m):
     return np.exp(1j * phase)                         # (4, n_angles) complex128
 
 
-def _mvdr_doa(caf_list, row, col, nb_r, nb_d, loading, A_mat):
+def _cbf_doa(caf_list, row, col, A_mat):
     """
-    Estimate DOA for a single target cell using the MVDR / Capon beamformer.
+    Estimate DOA for a single target cell using conventional beamforming.
 
-    Parameters
-    ----------
-    caf_list : list of 4 (nd, nl) complex arrays  (caf1..caf4)
-    row, col : target cell index
-    nb_r     : int — neighbourhood half-width along delay axis
-    nb_d     : int — neighbourhood half-width along Doppler axis
-    loading  : float — diagonal loading added to R to prevent near-singularity
-    A_mat    : (4, n_angles) complex — pre-computed steering matrix
+    Snapshot x = [caf1[r,d], caf2[r,d], caf3[r,d], caf4[r,d]] (4,) complex.
+    Beam power  P(θ) = |a(θ)^H x|²  — maximised at the angle whose steering
+    vector matches the measured inter-element phase progression.
+    No covariance matrix or inversion required; stable with a single snapshot.
 
-    Returns
-    -------
-    doa_deg  : float — peak-power DOA angle (deg, relative to boresight)
+    Returns the index into A_mat's column axis of the peak angle.
     """
-    nd, nl = caf_list[0].shape
-    r0 = max(0, row - nb_r); r1 = min(nd, row + nb_r + 1)
-    c0 = max(0, col - nb_d); c1 = min(nl, col + nb_d + 1)
-
-    # Build snapshot matrix X: shape (N_cells, 4)
-    # Each row is one space-time cell's 4-antenna observation.
-    # Using the neighbourhood snapshot is equivalent to averaging the
-    # sample covariance over nearby range-Doppler bins — gives a more
-    # stable R than a single snapshot.
-    patches = [caf[r0:r1, c0:c1].ravel() for caf in caf_list]
-    X = np.stack(patches, axis=1)          # (N, 4) complex
-    N = X.shape[0]
-
-    # Sample covariance + diagonal loading
-    R = (X.conj().T @ X) / N              # (4, 4)
-    R += loading * np.eye(4, dtype=R.dtype)
-
-    try:
-        Rinv = np.linalg.inv(R)
-    except np.linalg.LinAlgError:
-        # Singular (e.g., N=1, loading too small) — fall back to identity
-        Rinv = np.eye(4, dtype=R.dtype)
-
-    # MVDR spectrum: P(θ) = 1 / Re(a^H R^{-1} a)
-    # Vectorised over all angles simultaneously.
-    #   A_mat : (4, n_angles)
-    #   Rinv  : (4, 4)
-    #   Rinv @ A_mat : (4, n_angles)
-    RinvA   = Rinv @ A_mat                 # (4, n_angles)
-    denom   = np.real(np.einsum('ia,ia->a', A_mat.conj(), RinvA))  # (n_angles,)
-    denom   = np.maximum(denom, 1e-30)
-    spectrum = 1.0 / denom
-
-    peak_idx = int(np.argmax(spectrum))
-    return peak_idx                        # return index; caller maps to angle
+    x    = np.array([caf[row, col] for caf in caf_list])   # (4,) complex
+    resp = np.abs(A_mat.conj().T @ x) ** 2                  # (n_angles,)
+    return int(np.argmax(resp))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -294,9 +256,8 @@ class _RDCfarDoaCanvas(FigureCanvas):
                  sample_rate, max_doppler, dynamic_range_db,
                  colormap, cfar_params,
                  baseline_m, carrier_freq_hz,
-                 # MVDR
-                 antenna_spacing_m, mvdr_loading, mvdr_angle_step, use_mvdr,
-                 mvdr_nb_r, mvdr_nb_d, max_targets,
+                 # Beamforming
+                 antenna_spacing_m, angle_step, max_targets,
                  # Geo
                  radar_lat, radar_lon, tx_lat, tx_lon,
                  boresight_az_deg, xy_extent_m,
@@ -311,16 +272,12 @@ class _RDCfarDoaCanvas(FigureCanvas):
         self._fc        = float(carrier_freq_hz)
         self._cfar      = dict(cfar_params)
         self._spacing   = float(antenna_spacing_m)
-        self._loading   = float(mvdr_loading)
-        self._angle_step = float(mvdr_angle_step)
-        self._use_mvdr  = bool(use_mvdr)
-        self._nb_r      = int(mvdr_nb_r)
-        self._nb_d      = int(mvdr_nb_d)
+        self._angle_step = float(angle_step)
         self._max_tgt   = int(max_targets)
         self._boresight = float(boresight_az_deg)
         self._xy_extent = float(xy_extent_m)
 
-        # ── Precompute MVDR angle grid and steering matrix ────────────────
+        # ── Precompute angle grid and steering matrix ─────────────────────
         # Done ONCE at init — the (4, n_angles) matrix A is reused every frame.
         self._angles = np.arange(-90.0, 90.0 + self._angle_step, self._angle_step)
         lam = _C / self._fc
@@ -441,7 +398,7 @@ class _RDCfarDoaCanvas(FigureCanvas):
         self._frame_dt_ms    = 0.0
         self._render_time_ms = 0.0
         self._cfar_time_ms   = 0.0
-        self._mvdr_time_ms   = 0.0
+        self._doa_time_ms    = 0.0
         self._frame_num      = 0
         self._n_detections   = 0
         self._n_targets      = 0
@@ -510,8 +467,8 @@ class _RDCfarDoaCanvas(FigureCanvas):
         else:
             self._scat_m.set_offsets(np.empty((0, 2)))
 
-        # ── Step 4: MVDR DOA + geolocation for each target ───────────────
-        mvdr_start = time.perf_counter()
+        # ── Step 4: CBF DOA + geolocation for each target ────────────────
+        doa_start = time.perf_counter()
         targets = []
         for idx, (row, col) in enumerate(peaks):
             # Bistatic range (m): baseline + delay_bin * c / fs
@@ -520,16 +477,8 @@ class _RDCfarDoaCanvas(FigureCanvas):
             doppler_center_bin = row - self._nd / 2.0
             v_ms = doppler_center_bin * (_C / self._fc) * (self._max_dop / (self._nd / 2.0))
 
-            # MVDR or conventional beamforming
-            if self._use_mvdr:
-                angle_idx = _mvdr_doa(caf_list, row, col,
-                                      self._nb_r, self._nb_d,
-                                      self._loading, self._A)
-            else:
-                # Conventional delay-and-sum: power of sum of steered snapshots
-                x_snap = np.array([caf[row, col] for caf in caf_list])  # (4,)
-                resp   = np.abs(self._A.conj().T @ x_snap) ** 2         # (n_angles,)
-                angle_idx = int(np.argmax(resp))
+            # Conventional beamforming — single peak-cell snapshot
+            angle_idx = _cbf_doa(caf_list, row, col, self._A)
 
             doa_deg     = float(self._angles[angle_idx])
             global_bear = (self._boresight + doa_deg) % 360.0
@@ -549,7 +498,7 @@ class _RDCfarDoaCanvas(FigureCanvas):
                 'col':      col,
             })
 
-        self._mvdr_time_ms = (time.perf_counter() - mvdr_start) * 1e3
+        self._doa_time_ms = (time.perf_counter() - doa_start) * 1e3
         self._target_list  = targets
 
         # ── Step 5: XY map update ─────────────────────────────────────────
@@ -583,7 +532,8 @@ class _RDCfarDoaCanvas(FigureCanvas):
         self._ax_m.set_title(
             f'CA-CFAR  Pfa={self._cfar["pfa"]:.0e}  '
             f'{self._n_detections} det → {self._n_targets} tgt  '
-            f'CFAR {self._cfar_time_ms:.1f}ms  MVDR {self._mvdr_time_ms:.1f}ms',
+            f'CFAR {self._cfar_time_ms:.1f}ms  DOA {self._doa_time_ms:.1f}ms  '
+            f'frame {self._frame_dt_ms:.0f}ms',
             color='#ffffff', fontsize=9, fontweight='bold',
         )
         self._ax_r.set_title(
@@ -645,13 +595,10 @@ class _RDCfarDoaCanvas(FigureCanvas):
         lam = _C / self._fc
         self._A = _build_steering_matrix(self._angles, self._spacing, lam)
 
-    def set_mvdr_loading(self, val):
-        self._loading = float(val)
-
     def set_max_targets(self, val):
         self._max_tgt = int(val)
 
-    def set_mvdr_angle_step(self, val):
+    def set_angle_step(self, val):
         self._angle_step = float(val)
         self._angles = np.arange(-90.0, 90.0 + self._angle_step, self._angle_step)
         lam = _C / self._fc
@@ -677,7 +624,7 @@ class _RDCfarDoaCanvas(FigureCanvas):
     # ── CSV recording ─────────────────────────────────────────────────────
     _CSV_HEADER = [
         'timestamp_iso', 'frame_num',
-        'frame_dt_ms', 'render_time_ms', 'cfar_time_ms', 'mvdr_time_ms',
+        'frame_dt_ms', 'render_time_ms', 'cfar_time_ms', 'doa_time_ms',
         'peak_db', 'n_detections', 'n_targets',
         'pc_work_time_avg_us', 'pc_input_buf_full_avg',
         'pc_throughput_avg', 'nitems_read',
@@ -711,7 +658,7 @@ class _RDCfarDoaCanvas(FigureCanvas):
             f'{self._frame_dt_ms:.3f}',
             f'{self._render_time_ms:.3f}',
             f'{self._cfar_time_ms:.3f}',
-            f'{self._mvdr_time_ms:.3f}',
+            f'{self._doa_time_ms:.3f}',
             f'{peak_db:.2f}',
             self._n_detections,
             self._n_targets,
@@ -738,8 +685,7 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
                  sample_rate, max_doppler, dynamic_range_db,
                  colormap, cfar_params,
                  baseline_m, carrier_freq_hz,
-                 antenna_spacing_m, mvdr_loading, mvdr_angle_step, use_mvdr,
-                 mvdr_nb_r, mvdr_nb_d, max_targets,
+                 antenna_spacing_m, angle_step, max_targets,
                  radar_lat, radar_lon, tx_lat, tx_lon,
                  boresight_az_deg, xy_extent_m,
                  parent=None):
@@ -756,8 +702,8 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
             QPushButton:hover { background:#2a2a2a; }
             QPushButton[recording="true"] { background:#8b1a1a; border:1px solid #c33;
                                             color:#fff; font-weight:bold; }
-            QPlainTextEdit { background:#0a0a0a; color:#99ffcc; font-family:monospace;
-                             font-size:9px; border:1px solid #333; }
+            QPlainTextEdit { background:#0a0a0a; color:#4a5a6a; font-family:'Consolas','Courier New',monospace;
+                             font-size:8px; border:1px solid #1e2830; }
         """)
 
         outer = QtWidgets.QVBoxLayout(self)
@@ -775,11 +721,7 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
             baseline_m=baseline_m,
             carrier_freq_hz=carrier_freq_hz,
             antenna_spacing_m=antenna_spacing_m,
-            mvdr_loading=mvdr_loading,
-            mvdr_angle_step=mvdr_angle_step,
-            use_mvdr=use_mvdr,
-            mvdr_nb_r=mvdr_nb_r,
-            mvdr_nb_d=mvdr_nb_d,
+            angle_step=angle_step,
             max_targets=max_targets,
             radar_lat=radar_lat, radar_lon=radar_lon,
             tx_lat=tx_lat, tx_lon=tx_lon,
@@ -891,9 +833,8 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
     def set_train_cells(self, r, d):  self.canvas.set_train_cells(r, d)
     def set_guard_cells(self, r, d):  self.canvas.set_guard_cells(r, d)
     def set_antenna_spacing(self, v): self.canvas.set_antenna_spacing(v)
-    def set_mvdr_loading(self, v):    self.canvas.set_mvdr_loading(v)
     def set_max_targets(self, v):     self.canvas.set_max_targets(v)
-    def set_mvdr_angle_step(self, v): self.canvas.set_mvdr_angle_step(v)
+    def set_angle_step(self, v):      self.canvas.set_angle_step(v)
 
     # ── Record CSV ────────────────────────────────────────────────────────
     def _on_record_toggled(self, checked):
@@ -991,15 +932,10 @@ class rd_plot_cfar_doa(gr.sync_block):
                  cfar_guard_range=2,
                  cfar_guard_doppler=1,
                  cfar_pfa=1e-4,
-                 # Target clustering
+                 # Target clustering / DOA
                  max_targets=32,
-                 # MVDR / DOA
                  antenna_spacing_m=0.3,
-                 mvdr_loading=0.01,
-                 mvdr_angle_step=1.0,
-                 mvdr_nb_r=2,
-                 mvdr_nb_d=2,
-                 use_mvdr=True,
+                 angle_step=1.0,
                  # Geo
                  radar_lat=0.0,
                  radar_lon=0.0,
@@ -1036,11 +972,7 @@ class rd_plot_cfar_doa(gr.sync_block):
             baseline_m=baseline_m,
             carrier_freq_hz=carrier_freq_hz,
             antenna_spacing_m=antenna_spacing_m,
-            mvdr_loading=mvdr_loading,
-            mvdr_angle_step=mvdr_angle_step,
-            use_mvdr=use_mvdr,
-            mvdr_nb_r=mvdr_nb_r,
-            mvdr_nb_d=mvdr_nb_d,
+            angle_step=angle_step,
             max_targets=max_targets,
             radar_lat=radar_lat, radar_lon=radar_lon,
             tx_lat=tx_lat, tx_lon=tx_lon,
@@ -1102,6 +1034,5 @@ class rd_plot_cfar_doa(gr.sync_block):
     def set_train_cells(self, r, d):   self._win.set_train_cells(r, d)
     def set_guard_cells(self, r, d):   self._win.set_guard_cells(r, d)
     def set_antenna_spacing(self, v):  self._win.set_antenna_spacing(v)
-    def set_mvdr_loading(self, v):     self._win.set_mvdr_loading(v)
     def set_max_targets(self, v):      self._win.set_max_targets(v)
-    def set_mvdr_angle_step(self, v):  self._win.set_mvdr_angle_step(v)
+    def set_angle_step(self, v):       self._win.set_angle_step(v)
