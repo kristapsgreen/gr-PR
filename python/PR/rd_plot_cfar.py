@@ -30,6 +30,7 @@
 # │  table): O(N·M) setup, O(1) per cell. No scipy dependency.         │
 # └─────────────────────────────────────────────────────────────────────┘
 
+import collections
 import csv
 import os
 import time
@@ -118,7 +119,8 @@ def _ca_cfar_2d(power, train_r, train_d, guard_r, guard_d, pfa):
 # Signal bridge: GR thread → Qt GUI thread
 # ─────────────────────────────────────────────────────────────────────────────
 class _Bridge(QObject):
-    new_frame = pyqtSignal(np.ndarray)
+    # object payload: ndarray in 'single' mode, 4-tuple of ndarrays in 'sum4' mode
+    new_frame = pyqtSignal(object)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -130,17 +132,23 @@ class _RDCfarCanvas(FigureCanvas):
                  sample_rate, max_doppler, dynamic_range_db,
                  colormap, cfar_params,
                  baseline_m=0.0, carrier_freq_hz=510e6,
+                 input_mode='single', cfar_trail_frames=0,
                  parent=None):
 
-        self._nd       = num_doppler_bins
-        self._nl       = num_delay_bins
-        self._fs       = sample_rate
-        self._max_dop  = max_doppler
-        self._dyn_db   = dynamic_range_db
-        self._baseline = float(baseline_m)
-        self._fc       = float(carrier_freq_hz)
+        self._nd         = num_doppler_bins
+        self._nl         = num_delay_bins
+        self._fs         = sample_rate
+        self._max_dop    = max_doppler
+        self._dyn_db     = dynamic_range_db
+        self._baseline   = float(baseline_m)
+        self._fc         = float(carrier_freq_hz)
+        self._input_mode = str(input_mode)
         # cfar_params = dict(train_r, train_d, guard_r, guard_d, pfa)
-        self._cfar     = dict(cfar_params)
+        self._cfar       = dict(cfar_params)
+
+        # Trail deque: rolling history of past CFAR bool arrays
+        n_trail = max(0, int(cfar_trail_frames))
+        self._trail = collections.deque(maxlen=n_trail) if n_trail > 0 else None
 
         # ── Figure: two side-by-side subplots ─────────────────────────────
         fig = Figure(figsize=(14, 5), facecolor='#0a0a0a')
@@ -182,7 +190,7 @@ class _RDCfarCanvas(FigureCanvas):
         )
 
         # ── Shared styling ────────────────────────────────────────────────
-        for ax, title in ((ax_l, 'Range–Doppler Map'),
+        for ax, title in ((ax_l, f'Range–Doppler Map  [{input_mode}]'),
                           (ax_r, 'CA-CFAR Detections')):
             ax.set_facecolor('#0a0a0a')
             ax.set_xlabel('Bistatic Range  (m)', color='#cccccc', fontsize=10)
@@ -209,14 +217,25 @@ class _RDCfarCanvas(FigureCanvas):
         self.draw()
 
     # ── Called only from Qt GUI thread via QueuedConnection ──────────────
-    def update_frame(self, matrix: np.ndarray):
+    def update_frame(self, payload):
+        """
+        payload: single (nd,nl) complex array in 'single' mode,
+                 or tuple (caf1,caf2,caf3,caf4) in 'sum4' mode.
+        """
         render_start = time.perf_counter()
         if self._last_time is not None:
             self._frame_dt_ms = (render_start - self._last_time) * 1e3
         self._last_time = render_start
 
+        # Coherent sum before |·|² — per input_mode
+        if self._input_mode == 'sum4':
+            caf1, caf2, caf3, caf4 = payload
+            caf_combined = caf1 + caf2 + caf3 + caf4
+        else:
+            caf_combined = payload
+
         # |CAF|² in linear scale — CFAR operates on linear power
-        mag_sq = (np.abs(matrix) ** 2).astype(np.float64)
+        mag_sq = (np.abs(caf_combined) ** 2).astype(np.float64)
 
         # dB for the left plot
         eps = 1e-30
@@ -238,11 +257,29 @@ class _RDCfarCanvas(FigureCanvas):
         )
         self._cfar_time_ms = (time.perf_counter() - cfar_start) * 1e3
         self._n_detections = int(detections.sum())
-        self._im_r.set_data(detections.astype(np.float32))
+
+        # Trail overlay: combine past frames with current detections
+        if self._trail is not None and len(self._trail) > 0:
+            overlay = np.zeros(detections.shape, dtype=np.float32)
+            k = len(self._trail)
+            for i, past in enumerate(self._trail):
+                # Weight ramps from ~0.15 (oldest) to ~0.5 (most recent historical)
+                w = 0.15 + 0.35 * (i / max(1, k - 1))
+                np.maximum(overlay, past.astype(np.float32) * w, out=overlay)
+            # Current detections always at 1.0 — clearly above trail cap of 0.5
+            np.maximum(overlay, detections.astype(np.float32), out=overlay)
+            self._im_r.set_data(overlay)
+        else:
+            self._im_r.set_data(detections.astype(np.float32))
+
+        # Append current frame to trail AFTER rendering (don't self-trail)
+        if self._trail is not None:
+            self._trail.append(detections.copy())
 
         # Titles
+        mode_tag = f'[{self._input_mode}]'
         self._ax_l.set_title(
-            f'Range–Doppler Map    peak = {peak:.1f} dB',
+            f'Range–Doppler Map  {mode_tag}    peak = {peak:.1f} dB',
             color='#ffffff', fontsize=11, fontweight='bold',
         )
         self._ax_r.set_title(
@@ -300,6 +337,17 @@ class _RDCfarCanvas(FigureCanvas):
     def set_guard_cells(self, r, d):
         self._cfar['guard_r'] = int(r)
         self._cfar['guard_d'] = int(d)
+
+    def set_cfar_trail_frames(self, val):
+        n = max(0, int(val))
+        if n == 0:
+            self._trail = None
+        elif self._trail is None:
+            self._trail = collections.deque(maxlen=n)
+        else:
+            # Preserve as much existing history as fits the new length
+            old = list(self._trail)
+            self._trail = collections.deque(old[-n:], maxlen=n)
 
     # ── CSV recording (crash-safe: open/write/close per row) ─────────────
     _CSV_HEADER = [
@@ -366,6 +414,7 @@ class _RDCfarWidget(QtWidgets.QWidget):
                  sample_rate, max_doppler, dynamic_range_db,
                  colormap, cfar_params,
                  baseline_m=0.0, carrier_freq_hz=510e6,
+                 input_mode='single', cfar_trail_frames=0,
                  parent=None):
         super().__init__(parent)
         self.setStyleSheet("""
@@ -392,6 +441,8 @@ class _RDCfarWidget(QtWidgets.QWidget):
             dynamic_range_db, colormap, cfar_params,
             baseline_m=baseline_m,
             carrier_freq_hz=carrier_freq_hz,
+            input_mode=input_mode,
+            cfar_trail_frames=cfar_trail_frames,
             parent=self,
         )
         layout.addWidget(self.canvas, stretch=1)
@@ -432,6 +483,14 @@ class _RDCfarWidget(QtWidgets.QWidget):
         self._pfa.valueChanged.connect(self.canvas.set_pfa)
         ctrl.addWidget(self._pfa)
 
+        ctrl.addWidget(QtWidgets.QLabel('  Trail:'))
+        self._trail_spin = QtWidgets.QSpinBox()
+        self._trail_spin.setRange(0, 20)
+        self._trail_spin.setValue(max(0, int(cfar_trail_frames)))
+        self._trail_spin.setSuffix(' fr')
+        self._trail_spin.valueChanged.connect(self.canvas.set_cfar_trail_frames)
+        ctrl.addWidget(self._trail_spin)
+
         ctrl.addStretch()
 
         self._rec_btn = QtWidgets.QPushButton('● Record CSV')
@@ -444,14 +503,15 @@ class _RDCfarWidget(QtWidgets.QWidget):
         self.resize(1260, 580)
 
     # ── Runtime setters (callable from GRC variable blocks) ──────────────
-    def set_dynamic_range(self, val): self._dr_slider.setValue(int(val))
-    def set_colormap(self, name):     self._cmap.setCurrentText(name)
-    def set_max_doppler(self, val):   self.canvas.set_max_doppler(val)
-    def set_baseline(self, val):      self.canvas.set_baseline(val)
-    def set_carrier_freq(self, val):  self.canvas.set_carrier_freq(val)
-    def set_pfa(self, val):           self._pfa.setValue(float(val))
-    def set_train_cells(self, r, d):  self.canvas.set_train_cells(r, d)
-    def set_guard_cells(self, r, d):  self.canvas.set_guard_cells(r, d)
+    def set_dynamic_range(self, val):      self._dr_slider.setValue(int(val))
+    def set_colormap(self, name):          self._cmap.setCurrentText(name)
+    def set_max_doppler(self, val):        self.canvas.set_max_doppler(val)
+    def set_baseline(self, val):           self.canvas.set_baseline(val)
+    def set_carrier_freq(self, val):       self.canvas.set_carrier_freq(val)
+    def set_pfa(self, val):                self._pfa.setValue(float(val))
+    def set_train_cells(self, r, d):       self.canvas.set_train_cells(r, d)
+    def set_guard_cells(self, r, d):       self.canvas.set_guard_cells(r, d)
+    def set_cfar_trail_frames(self, val):  self._trail_spin.setValue(max(0, int(val)))
 
     # ── Record button handler ────────────────────────────────────────────
     def _on_record_toggled(self, checked):
@@ -524,19 +584,25 @@ class rd_plot_cfar(gr.sync_block):
                  cfar_train_doppler=4,
                  cfar_guard_range=2,
                  cfar_guard_doppler=1,
-                 cfar_pfa=1e-4):
+                 cfar_pfa=1e-4,
+                 # input_mode is startup-only: in_sig can't change after construction
+                 input_mode='single',
+                 cfar_trail_frames=0):
+
+        vec_t = np.dtype((np.complex64, num_doppler_bins * num_delay_bins))
+        # 'sum4': 4 inputs; coherent sum before |·|² drives RD/CFAR
+        in_sig = [vec_t] * 4 if str(input_mode) == 'sum4' else [vec_t]
 
         gr.sync_block.__init__(
             self,
             name="PR RD Plot CFAR",
-            in_sig=[
-                np.dtype((np.complex64, num_doppler_bins * num_delay_bins)),
-            ],
+            in_sig=in_sig,
             out_sig=[],
         )
 
-        self._nd = num_doppler_bins
-        self._nl = num_delay_bins
+        self._nd         = num_doppler_bins
+        self._nl         = num_delay_bins
+        self._input_mode = str(input_mode)
 
         cfar_params = dict(
             train_r=int(cfar_train_range),
@@ -553,6 +619,8 @@ class rd_plot_cfar(gr.sync_block):
             sample_rate, max_doppler, dynamic_range_db,
             colormap, cfar_params,
             baseline_m=baseline_m, carrier_freq_hz=carrier_freq_hz,
+            input_mode=input_mode,
+            cfar_trail_frames=cfar_trail_frames,
         )
 
         self._bridge.new_frame.connect(
@@ -581,9 +649,16 @@ class rd_plot_cfar(gr.sync_block):
     # ── GNU Radio work() ─────────────────────────────────────────────────
     def work(self, input_items, output_items):
         frames = input_items[0]
-        for flat in frames:
-            matrix = flat.reshape(self._nd, self._nl).copy()
-            self._bridge.new_frame.emit(matrix)
+        for i in range(len(frames)):
+            if self._input_mode == 'sum4':
+                # Emit tuple of 4 reshaped arrays; canvas does coherent sum
+                payload = tuple(
+                    input_items[p][i].reshape(self._nd, self._nl).copy()
+                    for p in range(4)
+                )
+            else:
+                payload = frames[i].reshape(self._nd, self._nl).copy()
+            self._bridge.new_frame.emit(payload)
         return len(frames)
 
     # ── GRC integration ───────────────────────────────────────────────────
@@ -591,11 +666,13 @@ class rd_plot_cfar(gr.sync_block):
         return self._win
 
     # ── Runtime callbacks ────────────────────────────────────────────────
-    def set_dynamic_range(self, val): self._win.set_dynamic_range(val)
-    def set_colormap(self, name):     self._win.set_colormap(name)
-    def set_max_doppler(self, val):   self._win.set_max_doppler(val)
-    def set_baseline(self, val):      self._win.set_baseline(val)
-    def set_carrier_freq(self, val):  self._win.set_carrier_freq(val)
-    def set_pfa(self, val):           self._win.set_pfa(val)
-    def set_train_cells(self, r, d):  self._win.set_train_cells(r, d)
-    def set_guard_cells(self, r, d):  self._win.set_guard_cells(r, d)
+    def set_dynamic_range(self, val):     self._win.set_dynamic_range(val)
+    def set_colormap(self, name):         self._win.set_colormap(name)
+    def set_max_doppler(self, val):       self._win.set_max_doppler(val)
+    def set_baseline(self, val):          self._win.set_baseline(val)
+    def set_carrier_freq(self, val):      self._win.set_carrier_freq(val)
+    def set_pfa(self, val):               self._win.set_pfa(val)
+    def set_train_cells(self, r, d):      self._win.set_train_cells(r, d)
+    def set_guard_cells(self, r, d):      self._win.set_guard_cells(r, d)
+    # input_mode is startup-only (in_sig is fixed after construction)
+    def set_cfar_trail_frames(self, val): self._win.set_cfar_trail_frames(val)

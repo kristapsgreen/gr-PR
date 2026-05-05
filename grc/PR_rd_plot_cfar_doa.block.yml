@@ -29,6 +29,8 @@ templates:
         tx_lon=${tx_lon},
         boresight_az_deg=${boresight_az_deg},
         xy_extent_m=${xy_extent_m},
+        rd_input_mode=${rd_input_mode},
+        cfar_trail_frames=${cfar_trail_frames},
     )
   callbacks:
     - set_dynamic_range(${dynamic_range_db})
@@ -42,6 +44,8 @@ templates:
     - set_antenna_spacing(${antenna_spacing_m})
     - set_max_targets(${max_targets})
     - set_angle_step(${angle_step})
+    - set_rd_input_mode(${rd_input_mode})
+    - set_cfar_trail_frames(${cfar_trail_frames})
 
 parameters:
   # ── Core RD parameters ────────────────────────────────────────────────
@@ -116,6 +120,20 @@ parameters:
     label: CFAR Pfa
     dtype: float
     default: '1e-4'
+    category: CFAR
+
+  - id: rd_input_mode
+    label: RD Input Mode
+    dtype: enum
+    default: '"caf1"'
+    options: ['"caf1"', '"sum4"']
+    option_labels: [CAF-1 only, Sum-4 (coherent)]
+    hide: none
+
+  - id: cfar_trail_frames
+    label: CFAR Trail Frames
+    dtype: int
+    default: '0'
     category: CFAR
 
   # ── Targeting ─────────────────────────────────────────────────────────

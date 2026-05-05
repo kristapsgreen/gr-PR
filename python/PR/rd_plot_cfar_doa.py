@@ -27,6 +27,7 @@
 # │     error for baselines < 50 km) — no geodesy in the hot path.     │
 # └─────────────────────────────────────────────────────────────────────┘
 
+import collections
 import csv
 import math
 import os
@@ -261,21 +262,27 @@ class _RDCfarDoaCanvas(FigureCanvas):
                  # Geo
                  radar_lat, radar_lon, tx_lat, tx_lon,
                  boresight_az_deg, xy_extent_m,
+                 rd_input_mode='caf1', cfar_trail_frames=0,
                  parent=None):
 
-        self._nd        = num_doppler_bins
-        self._nl        = num_delay_bins
-        self._fs        = sample_rate
-        self._max_dop   = float(max_doppler)
-        self._dyn_db    = float(dynamic_range_db)
-        self._baseline  = float(baseline_m)
-        self._fc        = float(carrier_freq_hz)
-        self._cfar      = dict(cfar_params)
-        self._spacing   = float(antenna_spacing_m)
-        self._angle_step = float(angle_step)
-        self._max_tgt   = int(max_targets)
-        self._boresight = float(boresight_az_deg)
-        self._xy_extent = float(xy_extent_m)
+        self._nd           = num_doppler_bins
+        self._nl           = num_delay_bins
+        self._fs           = sample_rate
+        self._max_dop      = float(max_doppler)
+        self._dyn_db       = float(dynamic_range_db)
+        self._baseline     = float(baseline_m)
+        self._fc           = float(carrier_freq_hz)
+        self._cfar         = dict(cfar_params)
+        self._spacing      = float(antenna_spacing_m)
+        self._angle_step   = float(angle_step)
+        self._max_tgt      = int(max_targets)
+        self._boresight    = float(boresight_az_deg)
+        self._xy_extent    = float(xy_extent_m)
+        self._rd_input_mode = str(rd_input_mode)
+
+        # Trail deque: rolling history of past CFAR bool arrays
+        n_trail = max(0, int(cfar_trail_frames))
+        self._trail = collections.deque(maxlen=n_trail) if n_trail > 0 else None
 
         # ── Precompute angle grid and steering matrix ─────────────────────
         # Done ONCE at init — the (4, n_angles) matrix A is reused every frame.
@@ -381,7 +388,7 @@ class _RDCfarDoaCanvas(FigureCanvas):
         self._tgt_texts   = []   # list of Text artists, recycled each frame
 
         # ── Shared styling for the two RD axes ───────────────────────────
-        for ax, title in ((ax_l, 'Range–Doppler Map'),
+        for ax, title in ((ax_l, f'Range–Doppler Map  [{rd_input_mode}]'),
                           (ax_m, 'CA-CFAR Detections')):
             ax.set_facecolor('#0a0a0a')
             ax.set_xlabel('Bistatic Range  (m)', color='#cccccc', fontsize=9)
@@ -424,8 +431,12 @@ class _RDCfarDoaCanvas(FigureCanvas):
         caf1, caf2, caf3, caf4 = caf_tuple
         caf_list = [caf1, caf2, caf3, caf4]
 
-        # ── Step 1: |caf1|² — drives both the RD map and CFAR ────────────
-        mag_sq = (np.abs(caf1) ** 2).astype(np.float64)
+        # ── Step 1: RD/CFAR power — caf1 only, or coherent sum of all 4 ──
+        if self._rd_input_mode == 'sum4':
+            caf_rd = caf1 + caf2 + caf3 + caf4
+        else:
+            caf_rd = caf1
+        mag_sq = (np.abs(caf_rd) ** 2).astype(np.float64)
 
         # dB for the left plot
         eps    = 1e-30
@@ -446,7 +457,22 @@ class _RDCfarDoaCanvas(FigureCanvas):
         )
         self._cfar_time_ms = (time.perf_counter() - cfar_start) * 1e3
         self._n_detections  = int(detections.sum())
-        self._im_m.set_data(detections.astype(np.float32))
+
+        # Trail overlay: combine past frames with current detections
+        if self._trail is not None and len(self._trail) > 0:
+            overlay = np.zeros(detections.shape, dtype=np.float32)
+            k = len(self._trail)
+            for i, past in enumerate(self._trail):
+                w = 0.15 + 0.35 * (i / max(1, k - 1))
+                np.maximum(overlay, past.astype(np.float32) * w, out=overlay)
+            np.maximum(overlay, detections.astype(np.float32), out=overlay)
+            self._im_m.set_data(overlay)
+        else:
+            self._im_m.set_data(detections.astype(np.float32))
+
+        # Append current frame AFTER rendering
+        if self._trail is not None:
+            self._trail.append(detections.copy())
 
         # ── Step 3: Cluster → peak cells ─────────────────────────────────
         peaks = _cluster_detections(detections, mag_sq, self._max_tgt)
@@ -525,8 +551,9 @@ class _RDCfarDoaCanvas(FigureCanvas):
             self._tgt_scatter.set_offsets(np.empty((0, 2)))
 
         # ── Step 6: Title updates ─────────────────────────────────────────
+        mode_tag = f'[{self._rd_input_mode}]'
         self._ax_l.set_title(
-            f'Range–Doppler Map    peak = {peak:.1f} dB',
+            f'Range–Doppler Map  {mode_tag}    peak = {peak:.1f} dB',
             color='#ffffff', fontsize=11, fontweight='bold',
         )
         self._ax_m.set_title(
@@ -603,6 +630,19 @@ class _RDCfarDoaCanvas(FigureCanvas):
         self._angles = np.arange(-90.0, 90.0 + self._angle_step, self._angle_step)
         lam = _C / self._fc
         self._A = _build_steering_matrix(self._angles, self._spacing, lam)
+
+    def set_rd_input_mode(self, val):
+        self._rd_input_mode = str(val)
+
+    def set_cfar_trail_frames(self, val):
+        n = max(0, int(val))
+        if n == 0:
+            self._trail = None
+        elif self._trail is None:
+            self._trail = collections.deque(maxlen=n)
+        else:
+            old = list(self._trail)
+            self._trail = collections.deque(old[-n:], maxlen=n)
 
     def _rescale_rd_axes(self):
         range_max_m = self._baseline + _C * self._nl / self._fs
@@ -688,6 +728,7 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
                  antenna_spacing_m, angle_step, max_targets,
                  radar_lat, radar_lon, tx_lat, tx_lon,
                  boresight_az_deg, xy_extent_m,
+                 rd_input_mode='caf1', cfar_trail_frames=0,
                  parent=None):
         super().__init__(parent)
         self.setStyleSheet("""
@@ -727,6 +768,8 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
             tx_lat=tx_lat, tx_lon=tx_lon,
             boresight_az_deg=boresight_az_deg,
             xy_extent_m=xy_extent_m,
+            rd_input_mode=rd_input_mode,
+            cfar_trail_frames=cfar_trail_frames,
             parent=self,
         )
         h_split.addWidget(self.canvas, stretch=4)
@@ -779,6 +822,21 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
         self._pfa.valueChanged.connect(self.canvas.set_pfa)
         ctrl.addWidget(self._pfa)
 
+        ctrl.addWidget(QtWidgets.QLabel('  RD mode:'))
+        self._rd_mode_combo = QtWidgets.QComboBox()
+        self._rd_mode_combo.addItems(['caf1', 'sum4'])
+        self._rd_mode_combo.setCurrentText(str(rd_input_mode))
+        self._rd_mode_combo.currentTextChanged.connect(self.canvas.set_rd_input_mode)
+        ctrl.addWidget(self._rd_mode_combo)
+
+        ctrl.addWidget(QtWidgets.QLabel('  Trail:'))
+        self._trail_spin = QtWidgets.QSpinBox()
+        self._trail_spin.setRange(0, 20)
+        self._trail_spin.setValue(max(0, int(cfar_trail_frames)))
+        self._trail_spin.setSuffix(' fr')
+        self._trail_spin.valueChanged.connect(self.canvas.set_cfar_trail_frames)
+        ctrl.addWidget(self._trail_spin)
+
         ctrl.addStretch()
 
         self._rec_btn = QtWidgets.QPushButton('● Record CSV')
@@ -815,17 +873,19 @@ class _RDCfarDoaWidget(QtWidgets.QWidget):
         self._tgt_text.setPlainText('\n'.join(lines))
 
     # ── Runtime setters ───────────────────────────────────────────────────
-    def set_dynamic_range(self, val): self._dr_slider.setValue(int(val))
-    def set_colormap(self, name):     self._cmap.setCurrentText(name)
-    def set_max_doppler(self, val):   self.canvas.set_max_doppler(val)
-    def set_baseline(self, val):      self.canvas.set_baseline(val)
-    def set_carrier_freq(self, val):  self.canvas.set_carrier_freq(val)
-    def set_pfa(self, val):           self._pfa.setValue(float(val))
-    def set_train_cells(self, r, d):  self.canvas.set_train_cells(r, d)
-    def set_guard_cells(self, r, d):  self.canvas.set_guard_cells(r, d)
-    def set_antenna_spacing(self, v): self.canvas.set_antenna_spacing(v)
-    def set_max_targets(self, v):     self.canvas.set_max_targets(v)
-    def set_angle_step(self, v):      self.canvas.set_angle_step(v)
+    def set_dynamic_range(self, val):      self._dr_slider.setValue(int(val))
+    def set_colormap(self, name):          self._cmap.setCurrentText(name)
+    def set_max_doppler(self, val):        self.canvas.set_max_doppler(val)
+    def set_baseline(self, val):           self.canvas.set_baseline(val)
+    def set_carrier_freq(self, val):       self.canvas.set_carrier_freq(val)
+    def set_pfa(self, val):                self._pfa.setValue(float(val))
+    def set_train_cells(self, r, d):       self.canvas.set_train_cells(r, d)
+    def set_guard_cells(self, r, d):       self.canvas.set_guard_cells(r, d)
+    def set_antenna_spacing(self, v):      self.canvas.set_antenna_spacing(v)
+    def set_max_targets(self, v):          self.canvas.set_max_targets(v)
+    def set_angle_step(self, v):           self.canvas.set_angle_step(v)
+    def set_rd_input_mode(self, val):      self._rd_mode_combo.setCurrentText(str(val))
+    def set_cfar_trail_frames(self, val):  self._trail_spin.setValue(max(0, int(val)))
 
     # ── Record CSV ────────────────────────────────────────────────────────
     def _on_record_toggled(self, checked):
@@ -929,7 +989,10 @@ class rd_plot_cfar_doa(gr.sync_block):
                  tx_lat=0.0,
                  tx_lon=0.01,
                  boresight_az_deg=0.0,
-                 xy_extent_m=15000.0):
+                 xy_extent_m=15000.0,
+                 # RD input mode: 'caf1' uses only caf1; 'sum4' coherently sums all 4
+                 rd_input_mode='caf1',
+                 cfar_trail_frames=0):
 
         vec_len = num_doppler_bins * num_delay_bins
         gr.sync_block.__init__(
@@ -965,6 +1028,8 @@ class rd_plot_cfar_doa(gr.sync_block):
             tx_lat=tx_lat, tx_lon=tx_lon,
             boresight_az_deg=boresight_az_deg,
             xy_extent_m=xy_extent_m,
+            rd_input_mode=rd_input_mode,
+            cfar_trail_frames=cfar_trail_frames,
         )
 
         # QueuedConnection: work() runs in GR thread, update_frame() in Qt thread
@@ -1012,14 +1077,16 @@ class rd_plot_cfar_doa(gr.sync_block):
         return self._win
 
     # ── Runtime callbacks (wirable from GRC variable blocks) ─────────────
-    def set_dynamic_range(self, val):  self._win.set_dynamic_range(val)
-    def set_colormap(self, name):      self._win.set_colormap(name)
-    def set_max_doppler(self, val):    self._win.set_max_doppler(val)
-    def set_baseline(self, val):       self._win.set_baseline(val)
-    def set_carrier_freq(self, val):   self._win.set_carrier_freq(val)
-    def set_pfa(self, val):            self._win.set_pfa(val)
-    def set_train_cells(self, r, d):   self._win.set_train_cells(r, d)
-    def set_guard_cells(self, r, d):   self._win.set_guard_cells(r, d)
-    def set_antenna_spacing(self, v):  self._win.set_antenna_spacing(v)
-    def set_max_targets(self, v):      self._win.set_max_targets(v)
-    def set_angle_step(self, v):       self._win.set_angle_step(v)
+    def set_dynamic_range(self, val):     self._win.set_dynamic_range(val)
+    def set_colormap(self, name):         self._win.set_colormap(name)
+    def set_max_doppler(self, val):       self._win.set_max_doppler(val)
+    def set_baseline(self, val):          self._win.set_baseline(val)
+    def set_carrier_freq(self, val):      self._win.set_carrier_freq(val)
+    def set_pfa(self, val):               self._win.set_pfa(val)
+    def set_train_cells(self, r, d):      self._win.set_train_cells(r, d)
+    def set_guard_cells(self, r, d):      self._win.set_guard_cells(r, d)
+    def set_antenna_spacing(self, v):     self._win.set_antenna_spacing(v)
+    def set_max_targets(self, v):         self._win.set_max_targets(v)
+    def set_angle_step(self, v):          self._win.set_angle_step(v)
+    def set_rd_input_mode(self, val):     self._win.set_rd_input_mode(val)
+    def set_cfar_trail_frames(self, val): self._win.set_cfar_trail_frames(val)

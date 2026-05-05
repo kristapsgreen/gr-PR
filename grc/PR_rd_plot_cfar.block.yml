@@ -20,6 +20,8 @@ templates:
         cfar_guard_range=${cfar_guard_range},
         cfar_guard_doppler=${cfar_guard_doppler},
         cfar_pfa=${cfar_pfa},
+        input_mode=${input_mode},
+        cfar_trail_frames=${cfar_trail_frames},
     )
   callbacks:
     - set_dynamic_range(${dynamic_range_db})
@@ -30,6 +32,7 @@ templates:
     - set_pfa(${cfar_pfa})
     - set_train_cells(${cfar_train_range}, ${cfar_train_doppler})
     - set_guard_cells(${cfar_guard_range}, ${cfar_guard_doppler})
+    - set_cfar_trail_frames(${cfar_trail_frames})
 
 parameters:
   - id: num_doppler_bins
@@ -104,15 +107,44 @@ parameters:
     default: '1e-4'
     category: CFAR
 
+  - id: input_mode
+    label: Input Mode
+    dtype: enum
+    default: '"single"'
+    options: ['"single"', '"sum4"']
+    option_labels: [Single (1 CAF), Sum-4 (coherent sum)]
+    hide: none
+
+  - id: cfar_trail_frames
+    label: CFAR Trail Frames
+    dtype: int
+    default: '0'
+    category: CFAR
+
   - id: gui_hint
     label: GUI Hint
     dtype: gui_hint
     hide: part
 
 inputs:
-  - label: caf_in
+  - label: caf1
     dtype: complex
     vlen: ${num_doppler_bins * num_delay_bins}
+
+  - label: caf2
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+    hide: ${'none' if input_mode == '"sum4"' else 'all'}
+
+  - label: caf3
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+    hide: ${'none' if input_mode == '"sum4"' else 'all'}
+
+  - label: caf4
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+    hide: ${'none' if input_mode == '"sum4"' else 'all'}
 
 outputs: []
 
