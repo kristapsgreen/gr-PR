@@ -24,6 +24,7 @@ from .caf import caf
 from .rd_plot import rd_plot
 from .rd_plot_cfar import rd_plot_cfar
 from .rd_plot_cfar_doa import rd_plot_cfar_doa
+from .rd_plot_cfar_doa_rec import rd_plot_cfar_doa_rec
 from .ECA import ECA
 from .cu_caf import cu_caf
 from .cu_caf_4x import cu_caf_4x

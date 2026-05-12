@@ -31,7 +31,8 @@ GR_PYTHON_INSTALL(
     cu_ECA.py
     cu_ECA_4x.py
     krakensdr_source.py
-    rd_plot_cfar_doa.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/PR
+    rd_plot_cfar_doa.py
+    rd_plot_cfar_doa_rec.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/PR
 )
 
 ########################################################################
