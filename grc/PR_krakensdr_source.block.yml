@@ -1,0 +1,71 @@
+id: PR_krakensdr_source
+label: KrakenSDR Source (Vector)
+category: '[PR]'
+
+templates:
+  imports: from gnuradio.PR import krakensdr_source
+  make: krakensdr_source(${ipAddr}, ${port}, ${ctrlPort}, ${numChannels}, ${freq}, ${gain}, ${cpi_size}, ${debug})
+  callbacks:
+  - set_gain(${gain})
+  - set_freq(${freq})
+
+parameters:
+- id: ipAddr
+  label: Heimdall IP Address
+  dtype: string
+  default: 127.0.0.1
+- id: port
+  label: Heimdall IQ Data Port
+  dtype: int
+  default: 5000
+- id: ctrlPort
+  label: Heimdall Control Port
+  dtype: int
+  default: 5001
+- id: numChannels
+  label: Number of channels
+  dtype: int
+  default: 5
+- id: freq
+  label: Frequency [MHz]
+  dtype: real
+  default: 416.588
+- id: gain
+  label: Gain [0 - 49.6]
+  dtype: real_vector
+  default: [40.2, 40.2, 40.2, 40.2, 40.2]
+- id: cpi_size
+  label: CPI Size (samples)
+  dtype: int
+  default: 1000000
+- id: debug
+  label: Debug
+  dtype: bool
+  default: False
+
+outputs:
+- label: ch_
+  domain: stream
+  dtype: complex
+  vlen: ${cpi_size}
+  multiplicity: ${ numChannels }
+
+asserts:
+- ${ len(gain) == numChannels }
+- ${ numChannels > 0 }
+
+documentation: |-
+  Receives coherent IQ data from the KrakenSDR Heimdall DAQ software over a socket connection.
+  Outputs one full CPI vector per channel per work() call (vector length = cpi_size).
+
+  Set cpi_size to match the CPI length configured in Heimdall. Connect outputs directly
+  to PR CAF, ECA, or other vector-input blocks without needing stream_to_vector.
+
+  Run Heimdall first, then connect to it with this block. Heimdall handles all coherence
+  calibration automatically.
+
+  NOTES: Heimdall uses the KrakenSDR RTL-SDR driver branch, ensure that your system is
+  using this driver. Please consult the KrakenSDR documentation Wiki at
+  https://www.github.com/krakenrf/krakensdr_docs
+
+file_format: 1

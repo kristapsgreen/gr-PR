@@ -1,0 +1,104 @@
+id: PR_rd_plot
+label: RD Plot
+category: '[PR]'
+flags: [ show_id ]
+
+templates:
+  imports: from gnuradio.PR import rd_plot
+  make: |
+    rd_plot(
+        num_doppler_bins=${num_doppler_bins},
+        num_delay_bins=${num_delay_bins},
+        sample_rate=${sample_rate},
+        max_doppler=${max_doppler},
+        dynamic_range_db=${dynamic_range_db},
+        colormap=${colormap},
+        baseline_m=${baseline_m},
+        carrier_freq_hz=${carrier_freq_hz},
+    )
+  callbacks:
+    - set_dynamic_range(${dynamic_range_db})
+    - set_colormap(${colormap})
+    - set_max_doppler(${max_doppler})
+    - set_baseline(${baseline_m})
+    - set_carrier_freq(${carrier_freq_hz})
+
+parameters:
+  - id: num_doppler_bins
+    label: Doppler Bins
+    dtype: int
+    default: '128'
+
+  - id: num_delay_bins
+    label: Delay Bins
+    dtype: int
+    default: '128'
+
+  - id: sample_rate
+    label: Sample Rate (Hz)
+    dtype: float
+    default: 'samp_rate'
+
+  - id: max_doppler
+    label: Max Doppler (Hz)
+    dtype: float
+    default: '1000.0'
+
+  - id: baseline_m
+    label: Baseline L (m)
+    dtype: float
+    default: '0.0'
+
+  - id: carrier_freq_hz
+    label: Carrier Freq (Hz)
+    dtype: float
+    default: '510e6'
+
+  - id: dynamic_range_db
+    label: Dynamic Range (dB)
+    dtype: float
+    default: '60'
+
+  - id: colormap
+    label: Colormap
+    dtype: enum
+    default: '"inferno"'
+    options: ['"inferno"', '"plasma"', '"viridis"', '"magma"', '"hot"', '"jet"', '"turbo"']
+    option_labels: [Inferno, Plasma, Viridis, Magma, Hot, Jet, Turbo]
+
+  - id: gui_hint
+    label: GUI Hint
+    dtype: gui_hint
+    hide: part
+
+inputs:
+  - label: caf_in
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+outputs: []
+
+documentation: |-
+    Range-Doppler Qt Display Sink — gr-PR
+
+    Renders a live Range-Doppler map from the CAF block output.
+
+    INPUT
+      caf_in : complex64 vector, len = num_doppler_bins × num_delay_bins
+      Connect directly from the PR CAF block output.
+      Display uses magnitude only; phase available for DOA.
+
+    PARAMETERS
+      num_doppler_bins  — must match CAF block
+      num_delay_bins    — must match CAF block
+      sample_rate       — used for delay axis labelling
+      max_doppler       — ±Doppler range in Hz (must match CAF block)
+      dynamic_range_db  — colour scale depth. Adjust to your target SNR.
+      colormap          — initial colourmap (changeable at runtime in window)
+      gui_hint          — e.g. tab@0 to embed in the main GRC window
+
+    EMBEDDING
+      Set gui_hint to embed the plot in the GRC main window alongside
+      QT GUI controls. Leave empty for a standalone window.
+
+file_format: 1

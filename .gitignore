@@ -1,0 +1,17 @@
+# Build artifacts
+build/
+build*/
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+*~
+
+# Claude Code local files
+.claude/
+
+# Editor/OS junk
+.vscode/
+.idea/
+.DS_Store

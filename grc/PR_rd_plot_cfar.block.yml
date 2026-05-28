@@ -1,0 +1,172 @@
+id: PR_rd_plot_cfar
+label: RD Plot + CFAR
+category: '[PR]'
+flags: [ show_id ]
+
+templates:
+  imports: from gnuradio.PR import rd_plot_cfar
+  make: |
+    rd_plot_cfar(
+        num_doppler_bins=${num_doppler_bins},
+        num_delay_bins=${num_delay_bins},
+        sample_rate=${sample_rate},
+        max_doppler=${max_doppler},
+        dynamic_range_db=${dynamic_range_db},
+        colormap=${colormap},
+        baseline_m=${baseline_m},
+        carrier_freq_hz=${carrier_freq_hz},
+        cfar_train_range=${cfar_train_range},
+        cfar_train_doppler=${cfar_train_doppler},
+        cfar_guard_range=${cfar_guard_range},
+        cfar_guard_doppler=${cfar_guard_doppler},
+        cfar_pfa=${cfar_pfa},
+        input_mode=${input_mode},
+        cfar_trail_frames=${cfar_trail_frames},
+    )
+  callbacks:
+    - set_dynamic_range(${dynamic_range_db})
+    - set_colormap(${colormap})
+    - set_max_doppler(${max_doppler})
+    - set_baseline(${baseline_m})
+    - set_carrier_freq(${carrier_freq_hz})
+    - set_pfa(${cfar_pfa})
+    - set_train_cells(${cfar_train_range}, ${cfar_train_doppler})
+    - set_guard_cells(${cfar_guard_range}, ${cfar_guard_doppler})
+    - set_cfar_trail_frames(${cfar_trail_frames})
+
+parameters:
+  - id: num_doppler_bins
+    label: Doppler Bins
+    dtype: int
+    default: '128'
+
+  - id: num_delay_bins
+    label: Delay Bins
+    dtype: int
+    default: '128'
+
+  - id: sample_rate
+    label: Sample Rate (Hz)
+    dtype: float
+    default: 'samp_rate'
+
+  - id: max_doppler
+    label: Max Doppler (Hz)
+    dtype: float
+    default: '1000.0'
+
+  - id: baseline_m
+    label: Baseline L (m)
+    dtype: float
+    default: '0.0'
+
+  - id: carrier_freq_hz
+    label: Carrier Freq (Hz)
+    dtype: float
+    default: '510e6'
+
+  - id: dynamic_range_db
+    label: Dynamic Range (dB)
+    dtype: float
+    default: '60'
+
+  - id: colormap
+    label: Colormap
+    dtype: enum
+    default: '"inferno"'
+    options: ['"inferno"', '"plasma"', '"viridis"', '"magma"', '"hot"', '"jet"', '"turbo"']
+    option_labels: [Inferno, Plasma, Viridis, Magma, Hot, Jet, Turbo]
+
+  - id: cfar_train_range
+    label: CFAR Train cells (range)
+    dtype: int
+    default: '8'
+    category: CFAR
+
+  - id: cfar_train_doppler
+    label: CFAR Train cells (doppler)
+    dtype: int
+    default: '4'
+    category: CFAR
+
+  - id: cfar_guard_range
+    label: CFAR Guard cells (range)
+    dtype: int
+    default: '2'
+    category: CFAR
+
+  - id: cfar_guard_doppler
+    label: CFAR Guard cells (doppler)
+    dtype: int
+    default: '1'
+    category: CFAR
+
+  - id: cfar_pfa
+    label: CFAR Pfa
+    dtype: float
+    default: '1e-4'
+    category: CFAR
+
+  - id: input_mode
+    label: Input Mode
+    dtype: enum
+    default: '"single"'
+    options: ['"single"', '"sum4"']
+    option_labels: [Single (1 CAF), Sum-4 (coherent sum)]
+    hide: none
+
+  - id: cfar_trail_frames
+    label: CFAR Trail Frames
+    dtype: int
+    default: '0'
+    category: CFAR
+
+  - id: gui_hint
+    label: GUI Hint
+    dtype: gui_hint
+    hide: part
+
+inputs:
+  - label: caf1
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+  - label: caf2
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+    hide: ${'none' if input_mode == '"sum4"' else 'all'}
+
+  - label: caf3
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+    hide: ${'none' if input_mode == '"sum4"' else 'all'}
+
+  - label: caf4
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+    hide: ${'none' if input_mode == '"sum4"' else 'all'}
+
+outputs: []
+
+documentation: |-
+    Range-Doppler + CA-CFAR Qt Display Sink — gr-PR
+
+    Dual-plot variant of RD Plot. Shows the same |CAF|² map as rd_plot
+    on the left and a 2D Cell-Averaging CFAR detection mask on the right.
+
+    INPUT
+      caf_in : complex64 vector, len = num_doppler_bins × num_delay_bins
+      Connect directly from the PR CAF block output (same as rd_plot).
+
+    CFAR PARAMETERS
+      Train cells (range, doppler) — half-window of training cells around
+        the guard band. Larger windows give more stable noise estimates
+        but wider rejection regions. Typical: 4-16.
+      Guard cells (range, doppler) — half-window of cells immediately
+        around the CUT that are excluded from the noise estimate to
+        prevent target power leaking into training. Typical: 1-3.
+      Pfa — desired probability of false alarm. Lower Pfa → higher
+        threshold → fewer false alarms but also misses weaker targets.
+        Typical: 1e-3 to 1e-6.
+
+file_format: 1

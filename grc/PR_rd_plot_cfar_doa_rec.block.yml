@@ -1,0 +1,244 @@
+id: PR_rd_plot_cfar_doa_rec
+label: RD Plot + CFAR + DOA (REC)
+category: '[PR]'
+flags: [ show_id ]
+
+templates:
+  imports: from gnuradio.PR import rd_plot_cfar_doa_rec
+  make: |
+    rd_plot_cfar_doa_rec(
+        num_doppler_bins=${num_doppler_bins},
+        num_delay_bins=${num_delay_bins},
+        sample_rate=${sample_rate},
+        max_doppler=${max_doppler},
+        dynamic_range_db=${dynamic_range_db},
+        colormap=${colormap},
+        baseline_m=${baseline_m},
+        carrier_freq_hz=${carrier_freq_hz},
+        cfar_train_range=${cfar_train_range},
+        cfar_train_doppler=${cfar_train_doppler},
+        cfar_guard_range=${cfar_guard_range},
+        cfar_guard_doppler=${cfar_guard_doppler},
+        cfar_pfa=${cfar_pfa},
+        max_targets=${max_targets},
+        antenna_spacing_m=${antenna_spacing_m},
+        angle_step=${angle_step},
+        radar_lat=${radar_lat},
+        radar_lon=${radar_lon},
+        tx_lat=${tx_lat},
+        tx_lon=${tx_lon},
+        boresight_az_deg=${boresight_az_deg},
+        xy_extent_m=${xy_extent_m},
+        rd_input_mode=${rd_input_mode},
+        cfar_trail_frames=${cfar_trail_frames},
+    )
+  callbacks:
+    - set_dynamic_range(${dynamic_range_db})
+    - set_colormap(${colormap})
+    - set_max_doppler(${max_doppler})
+    - set_baseline(${baseline_m})
+    - set_carrier_freq(${carrier_freq_hz})
+    - set_pfa(${cfar_pfa})
+    - set_train_cells(${cfar_train_range}, ${cfar_train_doppler})
+    - set_guard_cells(${cfar_guard_range}, ${cfar_guard_doppler})
+    - set_antenna_spacing(${antenna_spacing_m})
+    - set_max_targets(${max_targets})
+    - set_angle_step(${angle_step})
+    - set_rd_input_mode(${rd_input_mode})
+    - set_cfar_trail_frames(${cfar_trail_frames})
+
+parameters:
+  # ── Core RD parameters ────────────────────────────────────────────────
+  - id: num_doppler_bins
+    label: Doppler Bins
+    dtype: int
+    default: '128'
+
+  - id: num_delay_bins
+    label: Delay Bins
+    dtype: int
+    default: '128'
+
+  - id: sample_rate
+    label: Sample Rate (Hz)
+    dtype: float
+    default: 'samp_rate'
+
+  - id: max_doppler
+    label: Max Doppler (Hz)
+    dtype: float
+    default: '1000.0'
+
+  - id: baseline_m
+    label: Baseline L (m)
+    dtype: float
+    default: '0.0'
+
+  - id: carrier_freq_hz
+    label: Carrier Freq (Hz)
+    dtype: float
+    default: '510e6'
+
+  - id: dynamic_range_db
+    label: Dynamic Range (dB)
+    dtype: float
+    default: '60'
+
+  - id: colormap
+    label: Colormap
+    dtype: enum
+    default: '"inferno"'
+    options: ['"inferno"', '"plasma"', '"viridis"', '"magma"', '"hot"', '"jet"', '"turbo"']
+    option_labels: [Inferno, Plasma, Viridis, Magma, Hot, Jet, Turbo]
+
+  # ── CFAR ─────────────────────────────────────────────────────────────
+  - id: cfar_train_range
+    label: CFAR Train cells (range)
+    dtype: int
+    default: '8'
+    category: CFAR
+
+  - id: cfar_train_doppler
+    label: CFAR Train cells (doppler)
+    dtype: int
+    default: '4'
+    category: CFAR
+
+  - id: cfar_guard_range
+    label: CFAR Guard cells (range)
+    dtype: int
+    default: '2'
+    category: CFAR
+
+  - id: cfar_guard_doppler
+    label: CFAR Guard cells (doppler)
+    dtype: int
+    default: '1'
+    category: CFAR
+
+  - id: cfar_pfa
+    label: CFAR Pfa
+    dtype: float
+    default: '1e-4'
+    category: CFAR
+
+  - id: rd_input_mode
+    label: RD Input Mode
+    dtype: enum
+    default: '"caf1"'
+    options: ['"caf1"', '"sum4"']
+    option_labels: [CAF-1 only, Sum-4 (coherent)]
+    hide: none
+
+  - id: cfar_trail_frames
+    label: CFAR Trail (1/e frames)
+    dtype: int
+    default: '150'
+    category: CFAR
+
+  # ── Targeting ─────────────────────────────────────────────────────────
+  - id: max_targets
+    label: Max Targets
+    dtype: int
+    default: '32'
+    category: DOA
+
+  # ── DOA ───────────────────────────────────────────────────────────────
+  - id: antenna_spacing_m
+    label: Antenna Spacing (m)
+    dtype: float
+    default: '0.3'
+    category: DOA
+
+  - id: angle_step
+    label: DOA Angle Step (deg)
+    dtype: float
+    default: '1.0'
+    category: DOA
+
+  # ── Geolocation ───────────────────────────────────────────────────────
+  - id: radar_lat
+    label: Radar Latitude (deg)
+    dtype: float
+    default: '0.0'
+    category: Geo
+
+  - id: radar_lon
+    label: Radar Longitude (deg)
+    dtype: float
+    default: '0.0'
+    category: Geo
+
+  - id: tx_lat
+    label: Tx Latitude (deg)
+    dtype: float
+    default: '0.0'
+    category: Geo
+
+  - id: tx_lon
+    label: Tx Longitude (deg)
+    dtype: float
+    default: '0.01'
+    category: Geo
+
+  - id: boresight_az_deg
+    label: Boresight Azimuth (deg from N)
+    dtype: float
+    default: '0.0'
+    category: Geo
+
+  - id: xy_extent_m
+    label: XY Map Half-Extent (m)
+    dtype: float
+    default: '15000.0'
+    category: Geo
+
+  - id: gui_hint
+    label: GUI Hint
+    dtype: gui_hint
+    hide: part
+
+inputs:
+  - label: caf1
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+  - label: caf2
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+  - label: caf3
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+  - label: caf4
+    dtype: complex
+    vlen: ${num_doppler_bins * num_delay_bins}
+
+outputs: []
+
+documentation: |-
+    Range-Doppler + CA-CFAR + CBF DOA + XY + REC — gr-PR
+
+    Near-copy of rd_plot_cfar_doa with three changes:
+
+    1. EXPONENTIAL-DECAY TRAIL (Tweak 1)
+       O(1) per frame: trail_overlay *= decay, then np.maximum with current
+       detections. decay = exp(-1/trail_frames). Default trail_frames=150
+       (i.e. brightness falls to 1/e after 150 frames). Range 0–500 in GUI.
+       "Clear trail" button zeroes the overlay instantly.
+
+    2. WHITE FONT IN TARGET PANEL (Tweak 2)
+       QPlainTextEdit uses color:#ffffff at 10px (was #4a5a6a at 8px).
+
+    3. PER-DETECTION CSV (Tweak 3)
+       Independent "● Record Detections" button. One row per target per frame.
+       Columns: timestamp_utc, frame_num, det_idx, peak_db,
+                bistatic_range_m, bistatic_velocity_ms, doa_deg,
+                bearing_deg, x_m, y_m.
+       File handle kept open; rows batch-written and flushed each frame.
+
+    All other features (rd_input_mode caf1/sum4, frame-metrics CSV, MVDR DOA,
+    XY map, target list panel, all runtime setters) are unchanged.
+
+file_format: 1
