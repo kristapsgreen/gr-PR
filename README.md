@@ -1,6 +1,7 @@
 # gr-PR — Passive Radar GNU Radio OOT Modules 
 
->GNU Radio OOT modules implementing a multichannel DVB-T passive radar with DoA using KrakenSDR made as a part of a bachelour thesis
+>GNU Radio OOT modules implementing a multichannel DVB-T passive radar with DoA using KrakenSDR made as a part of a bachelour 
+[thesis](PR_bak_PUB_fin.pdf)
 
 
 ![Range-Doppler plot](docs/images/Picture_rd_plot+cfar+doa+rec.png)
